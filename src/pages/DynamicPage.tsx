@@ -42,7 +42,15 @@ export const DynamicPage = () => {
   }
 
   if (!page) {
-    return <Navigate to="/" />;
+    return (
+      <div className="flex min-h-[60vh] flex-col items-center justify-center space-y-4 text-center px-4">
+        <h1 className="text-4xl font-black tracking-tighter">Page Not Found</h1>
+        <p className="text-gray-500 max-w-md">The page you are looking for doesn't exist or hasn't been published yet.</p>
+        <a href="/" className="mt-4 bg-black text-white px-8 py-3 rounded-full font-bold hover:bg-gray-800 transition-colors">
+          Go Home
+        </a>
+      </div>
+    );
   }
 
   return (
