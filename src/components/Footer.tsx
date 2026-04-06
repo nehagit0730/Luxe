@@ -37,7 +37,7 @@ export const Footer = () => {
             <ul className="mt-4 space-y-2">
               <li><Link to="/privacy" className="text-sm text-gray-500 hover:text-black">Privacy Policy</Link></li>
               <li><Link to="/terms" className="text-sm text-gray-500 hover:text-black">Terms of Service</Link></li>
-              <li><Link to="/cookies" className="text-sm text-gray-500 hover:text-black">Cookie Policy</Link></li>
+              <li><Link to="/admin/login" className="text-sm text-gray-500 hover:text-black font-bold">Admin Login</Link></li>
             </ul>
           </div>
         </div>

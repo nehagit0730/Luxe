@@ -123,6 +123,11 @@ export const Login = () => {
         <p className="text-center text-sm text-gray-500">
           Don't have an account? <Link to="/register" className="font-bold text-black hover:underline">Sign up</Link>
         </p>
+        <div className="pt-4 border-t text-center">
+          <Link to="/admin/login" className="text-xs font-bold text-gray-400 hover:text-black transition-colors">
+            Are you an administrator? Admin Login &rarr;
+          </Link>
+        </div>
       </div>
     </div>
   );
