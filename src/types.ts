@@ -89,6 +89,7 @@ export interface Media {
   name: string;
   type: string;
   size: number;
+  storagePath?: string;
   createdAt: string;
 }
 

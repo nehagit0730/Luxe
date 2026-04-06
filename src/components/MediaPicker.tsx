@@ -1,6 +1,7 @@
 import React from 'react';
 import { collection, getDocs, addDoc, query, orderBy, deleteDoc, doc } from 'firebase/firestore';
-import { db } from '../firebase';
+import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
+import { db, storage } from '../firebase';
 import { Media } from '../types';
 import { Button } from './Button';
 import { Image as ImageIcon, Plus, X, Search, Check, Trash2, Upload } from 'lucide-react';
@@ -32,51 +33,145 @@ export const MediaPicker: React.FC<MediaPickerProps> = ({ onSelect, onClose, all
     fetchMedia();
   }, []);
 
+  const compressImage = (file: File): Promise<string | Blob> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = (event) => {
+        const img = new Image();
+        img.src = event.target?.result as string;
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          let width = img.width;
+          let height = img.height;
+
+          // Max dimensions for web optimization
+          const MAX_WIDTH = 1920;
+          const MAX_HEIGHT = 1080;
+
+          if (width > height) {
+            if (width > MAX_WIDTH) {
+              height *= MAX_WIDTH / width;
+              width = MAX_WIDTH;
+            }
+          } else {
+            if (height > MAX_HEIGHT) {
+              width *= MAX_HEIGHT / height;
+              height = MAX_HEIGHT;
+            }
+          }
+
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx?.drawImage(img, 0, 0, width, height);
+
+          // Try to get a compressed blob first
+          canvas.toBlob(
+            (blob) => {
+              if (blob) {
+                // If blob is small enough, we can also return base64 as fallback
+                if (blob.size < 800 * 1024) {
+                  const base64 = canvas.toDataURL('image/jpeg', 0.8);
+                  resolve(base64); // Return base64 if it's safe for Firestore
+                } else {
+                  resolve(blob); // Return blob for Storage
+                }
+              } else {
+                reject(new Error('Canvas to Blob failed'));
+              }
+            },
+            'image/jpeg',
+            0.8
+          );
+        };
+      };
+      reader.onerror = (error) => reject(error);
+    });
+  };
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (file.size > 800 * 1024) {
-      alert('File is too large. Please upload an image smaller than 800KB (Firestore limit for base64).');
-      return;
-    }
-
     setUploading(true);
     try {
-      const reader = new FileReader();
-      reader.onloadend = async () => {
-        try {
-          const base64 = reader.result as string;
-          const newMedia = {
-            name: file.name,
-            url: base64,
-            type: file.type,
-            size: file.size,
-            createdAt: new Date().toISOString()
-          };
-          const docRef = await addDoc(collection(db, 'media'), newMedia);
-          const mediaItem = { id: docRef.id, ...newMedia } as Media;
-          setMedia(prev => [mediaItem, ...prev]);
-          setView('grid');
-        } catch (err) {
-          console.error('Error adding media to Firestore:', err);
-          alert('Failed to save image. It might be too large for Firestore storage.');
-        } finally {
-          setUploading(false);
+      // 1. Compress image for better reliability
+      const compressedResult = await compressImage(file);
+      const isBase64 = typeof compressedResult === 'string';
+      
+      let downloadURL = '';
+      let storagePath = '';
+
+      try {
+        // 2. Attempt Firebase Storage Upload
+        storagePath = `media/${Date.now()}-${file.name}`;
+        const storageRef = ref(storage, storagePath);
+        
+        // Convert base64 back to blob if needed for storage
+        const uploadData = isBase64 
+          ? await (await fetch(compressedResult)).blob() 
+          : compressedResult;
+
+        const snapshot = await uploadBytes(storageRef, uploadData);
+        downloadURL = await getDownloadURL(snapshot.ref);
+      } catch (storageErr: any) {
+        console.warn('Firebase Storage failed, falling back to Firestore:', storageErr);
+        
+        // 3. Fallback to Base64 in Firestore if Storage fails (retry-limit-exceeded)
+        if (isBase64) {
+          downloadURL = compressedResult;
+          storagePath = ''; // No storage path for fallback
+        } else {
+          // If it's still a blob and too big, we really can't save it without Storage
+          throw new Error('Storage unavailable and file too large for database fallback.');
         }
+      }
+
+      // 4. Save metadata to Firestore
+      const newMedia = {
+        name: file.name,
+        url: downloadURL,
+        storagePath: storagePath,
+        type: file.type,
+        size: file.size,
+        createdAt: new Date().toISOString()
       };
-      reader.readAsDataURL(file);
-    } catch (err) {
-      console.error('Error reading file:', err);
+      
+      const docRef = await addDoc(collection(db, 'media'), newMedia);
+      const mediaItem = { id: docRef.id, ...newMedia } as Media;
+      
+      setMedia(prev => [mediaItem, ...prev]);
+      setView('grid');
+    } catch (err: any) {
+      console.error('Error uploading media:', err);
+      const message = err.code === 'storage/retry-limit-exceeded' 
+        ? 'Connection to Storage timed out. Please ensure Storage is enabled in your Firebase Console.'
+        : 'Failed to upload image. ' + (err.message || '');
+      alert(message);
+    } finally {
       setUploading(false);
     }
   };
 
-  const handleDelete = async (id: string, e: React.MouseEvent) => {
+  const handleDelete = async (item: Media, e: React.MouseEvent) => {
     e.stopPropagation();
     if (window.confirm('Are you sure you want to delete this media?')) {
-      await deleteDoc(doc(db, 'media', id));
-      setMedia(media.filter(m => m.id !== id));
+      try {
+        // 1. Delete from Firebase Storage if path exists
+        if (item.storagePath) {
+          const storageRef = ref(storage, item.storagePath);
+          await deleteObject(storageRef);
+        }
+        
+        // 2. Delete from Firestore
+        await deleteDoc(doc(db, 'media', item.id));
+        
+        setMedia(prev => prev.filter(m => m.id !== item.id));
+      } catch (err) {
+        console.error('Error deleting media:', err);
+        alert('Failed to delete media. It might have already been removed.');
+      }
     }
   };
 
@@ -152,7 +247,7 @@ export const MediaPicker: React.FC<MediaPickerProps> = ({ onSelect, onClose, all
                             {isSelected && <div className="bg-black text-white p-1 rounded-full"><Check className="h-4 w-4" /></div>}
                             <button 
                               className="bg-white p-2 rounded-full text-red-600 hover:bg-red-50 transition-colors"
-                              onClick={(e) => handleDelete(item.id, e)}
+                              onClick={(e) => handleDelete(item, e)}
                             >
                               <Trash2 className="h-4 w-4" />
                             </button>
@@ -194,7 +289,7 @@ export const MediaPicker: React.FC<MediaPickerProps> = ({ onSelect, onClose, all
                     {uploading ? 'Uploading...' : 'Select Files'}
                   </span>
                 </label>
-                <p className="mt-4 text-[10px] text-gray-400 uppercase font-bold tracking-widest">Max size: 5MB</p>
+                <p className="mt-4 text-[10px] text-gray-400 uppercase font-bold tracking-widest">No size limit (Firebase Storage)</p>
               </div>
             </div>
           )}
