@@ -1,0 +1,5 @@
+{
+  "name": "LuxeCommerce",
+  "description": "A production-ready full-stack eCommerce platform with Admin Dashboard, Stripe payments, and real-time inventory management.",
+  "requestFramePermissions": []
+}
