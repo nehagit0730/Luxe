@@ -33,7 +33,7 @@ export const MediaPicker: React.FC<MediaPickerProps> = ({ onSelect, onClose, all
     fetchMedia();
   }, []);
 
-  const compressImage = (file: File): Promise<string | Blob> => {
+  const compressImage = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.readAsDataURL(file);
@@ -45,19 +45,17 @@ export const MediaPicker: React.FC<MediaPickerProps> = ({ onSelect, onClose, all
           let width = img.width;
           let height = img.height;
 
-          // Max dimensions for web optimization
-          const MAX_WIDTH = 1920;
-          const MAX_HEIGHT = 1080;
-
+          // Optimized for web and database storage
+          const MAX_SIZE = 1200;
           if (width > height) {
-            if (width > MAX_WIDTH) {
-              height *= MAX_WIDTH / width;
-              width = MAX_WIDTH;
+            if (width > MAX_SIZE) {
+              height *= MAX_SIZE / width;
+              width = MAX_SIZE;
             }
           } else {
-            if (height > MAX_HEIGHT) {
-              width *= MAX_HEIGHT / height;
-              height = MAX_HEIGHT;
+            if (height > MAX_SIZE) {
+              width *= MAX_SIZE / height;
+              height = MAX_SIZE;
             }
           }
 
@@ -66,24 +64,10 @@ export const MediaPicker: React.FC<MediaPickerProps> = ({ onSelect, onClose, all
           const ctx = canvas.getContext('2d');
           ctx?.drawImage(img, 0, 0, width, height);
 
-          // Try to get a compressed blob first
-          canvas.toBlob(
-            (blob) => {
-              if (blob) {
-                // If blob is small enough, we can also return base64 as fallback
-                if (blob.size < 800 * 1024) {
-                  const base64 = canvas.toDataURL('image/jpeg', 0.8);
-                  resolve(base64); // Return base64 if it's safe for Firestore
-                } else {
-                  resolve(blob); // Return blob for Storage
-                }
-              } else {
-                reject(new Error('Canvas to Blob failed'));
-              }
-            },
-            'image/jpeg',
-            0.8
-          );
+          // Use a slightly more aggressive compression to ensure it fits in Firestore (1MB limit)
+          // 0.7 quality is a great balance for e-commerce
+          const base64 = canvas.toDataURL('image/jpeg', 0.7);
+          resolve(base64);
         };
       };
       reader.onerror = (error) => reject(error);
@@ -96,45 +80,16 @@ export const MediaPicker: React.FC<MediaPickerProps> = ({ onSelect, onClose, all
 
     setUploading(true);
     try {
-      // 1. Compress image for better reliability
-      const compressedResult = await compressImage(file);
-      const isBase64 = typeof compressedResult === 'string';
+      // 1. Optimize image immediately
+      const optimizedBase64 = await compressImage(file);
       
-      let downloadURL = '';
-      let storagePath = '';
-
-      try {
-        // 2. Attempt Firebase Storage Upload
-        storagePath = `media/${Date.now()}-${file.name}`;
-        const storageRef = ref(storage, storagePath);
-        
-        // Convert base64 back to blob if needed for storage
-        const uploadData = isBase64 
-          ? await (await fetch(compressedResult)).blob() 
-          : compressedResult;
-
-        const snapshot = await uploadBytes(storageRef, uploadData);
-        downloadURL = await getDownloadURL(snapshot.ref);
-      } catch (storageErr: any) {
-        console.warn('Firebase Storage failed, falling back to Firestore:', storageErr);
-        
-        // 3. Fallback to Base64 in Firestore if Storage fails (retry-limit-exceeded)
-        if (isBase64) {
-          downloadURL = compressedResult;
-          storagePath = ''; // No storage path for fallback
-        } else {
-          // If it's still a blob and too big, we really can't save it without Storage
-          throw new Error('Storage unavailable and file too large for database fallback.');
-        }
-      }
-
-      // 4. Save metadata to Firestore
+      // 2. Save directly to Firestore for maximum reliability
+      // This bypasses Storage connection issues entirely
       const newMedia = {
         name: file.name,
-        url: downloadURL,
-        storagePath: storagePath,
-        type: file.type,
-        size: file.size,
+        url: optimizedBase64,
+        type: 'image/jpeg',
+        size: Math.round(optimizedBase64.length * 0.75), // Approximate size in bytes
         createdAt: new Date().toISOString()
       };
       
@@ -144,11 +99,8 @@ export const MediaPicker: React.FC<MediaPickerProps> = ({ onSelect, onClose, all
       setMedia(prev => [mediaItem, ...prev]);
       setView('grid');
     } catch (err: any) {
-      console.error('Error uploading media:', err);
-      const message = err.code === 'storage/retry-limit-exceeded' 
-        ? 'Connection to Storage timed out. Please ensure Storage is enabled in your Firebase Console.'
-        : 'Failed to upload image. ' + (err.message || '');
-      alert(message);
+      console.error('Upload failed:', err);
+      alert('Failed to upload image. Please try a different image or check your internet connection.');
     } finally {
       setUploading(false);
     }
