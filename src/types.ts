@@ -18,8 +18,11 @@ export interface Product {
   sku: string;
   images: string[];
   categoryId: string;
+  category?: string;
   tags: string[];
+  features?: string[];
   isFeatured: boolean;
+  status: 'active' | 'draft' | 'archived';
   createdAt: string;
 }
 
@@ -94,10 +97,10 @@ export interface Page {
 
 export interface Menu {
   id: string;
-  name: string;
+  title: string;
   items: {
     label: string;
-    path: string;
+    url: string;
     children?: any[];
   }[];
 }

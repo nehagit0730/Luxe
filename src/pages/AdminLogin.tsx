@@ -14,8 +14,14 @@ export const AdminLogin = () => {
   const [password, setPassword] = React.useState('');
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState('');
-  const { setUser } = useAuthStore();
+  const { user, isAdmin, setUser } = useAuthStore();
   const navigate = useNavigate();
+
+  React.useEffect(() => {
+    if (user && isAdmin) {
+      navigate('/admin');
+    }
+  }, [user, isAdmin, navigate]);
 
   const handleAdminLogin = async (e: React.FormEvent) => {
     e.preventDefault();

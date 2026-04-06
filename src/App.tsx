@@ -65,12 +65,14 @@ export default function App() {
     <Router>
       <Routes>
         {/* Admin Routes */}
-        <Route path="/admin/login" element={<AdminLogin />} />
-        <Route path="/admin/*" element={
-          <ProtectedRoute adminOnly>
-            <AdminLayout />
-          </ProtectedRoute>
-        } />
+        <Route path="/admin">
+          <Route path="login" element={<AdminLogin />} />
+          <Route path="*" element={
+            <ProtectedRoute adminOnly>
+              <AdminLayout />
+            </ProtectedRoute>
+          } />
+        </Route>
 
         {/* Storefront Routes */}
         <Route path="*" element={
