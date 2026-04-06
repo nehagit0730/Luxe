@@ -90,6 +90,40 @@
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["url", "name"]
+    },
+    "Page": {
+      "title": "Page",
+      "description": "Custom CMS pages",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "slug": { "type": "string" },
+        "sections": { "type": "array" },
+        "status": { "type": "string", "enum": ["draft", "published"] },
+        "seo": { "type": "object" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "slug"]
+    },
+    "Menu": {
+      "title": "Menu",
+      "description": "Navigation menus",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "items": { "type": "array" }
+      },
+      "required": ["name"]
+    },
+    "Setting": {
+      "title": "Setting",
+      "description": "Global app settings",
+      "type": "object",
+      "properties": {
+        "key": { "type": "string" },
+        "value": { "type": "object" }
+      },
+      "required": ["key"]
     }
   },
   "firestore": {
@@ -98,6 +132,9 @@
     "/categories/{categoryId}": { "schema": "Category", "description": "Product categories" },
     "/orders/{orderId}": { "schema": "Order", "description": "Customer orders" },
     "/coupons/{couponId}": { "schema": "Coupon", "description": "Discount coupons" },
-    "/media/{mediaId}": { "schema": "Media", "description": "Media library assets" }
+    "/media/{mediaId}": { "schema": "Media", "description": "Media library assets" },
+    "/pages/{pageId}": { "schema": "Page", "description": "CMS Pages" },
+    "/menus/{menuId}": { "schema": "Menu", "description": "Navigation Menus" },
+    "/settings/{settingId}": { "schema": "Setting", "description": "Global Settings" }
   }
 }

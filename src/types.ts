@@ -78,3 +78,26 @@ export interface Media {
   size: number;
   createdAt: string;
 }
+
+export interface Page {
+  id: string;
+  title: string;
+  slug: string;
+  sections: any[];
+  status: 'draft' | 'published';
+  seo: {
+    title?: string;
+    description?: string;
+  };
+  createdAt: string;
+}
+
+export interface Menu {
+  id: string;
+  name: string;
+  items: {
+    label: string;
+    path: string;
+    children?: any[];
+  }[];
+}

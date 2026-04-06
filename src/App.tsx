@@ -13,15 +13,21 @@ import { Checkout } from './pages/Checkout';
 import { Login } from './pages/Login';
 import { Register } from './pages/Register';
 import { OrderConfirmation } from './pages/OrderConfirmation';
+import { Profile } from './pages/Profile';
 import { AdminLayout } from './pages/Admin';
+import { AdminLogin } from './pages/AdminLogin';
 import { User } from './types';
 
 const ProtectedRoute = ({ children, adminOnly = false }: { children: React.ReactNode, adminOnly?: boolean }) => {
   const { user, isAdmin, isLoading } = useAuthStore();
 
   if (isLoading) return <div className="flex h-screen items-center justify-center">Loading...</div>;
-  if (!user) return <Navigate to="/login" />;
-  if (adminOnly && !isAdmin) return <Navigate to="/" />;
+  
+  if (adminOnly) {
+    if (!user || !isAdmin) return <Navigate to="/admin/login" />;
+  } else {
+    if (!user) return <Navigate to="/login" />;
+  }
 
   return <>{children}</>;
 };
@@ -58,7 +64,8 @@ export default function App() {
   return (
     <Router>
       <Routes>
-        {/* Admin Routes - No Layout wrapper here, AdminLayout has its own */}
+        {/* Admin Routes */}
+        <Route path="/admin/login" element={<AdminLogin />} />
         <Route path="/admin/*" element={
           <ProtectedRoute adminOnly>
             <AdminLayout />
@@ -77,7 +84,7 @@ export default function App() {
               <Route path="/order-confirmation/:orderId" element={<ProtectedRoute><OrderConfirmation /></ProtectedRoute>} />
               <Route path="/login" element={<Login />} />
               <Route path="/register" element={<Register />} />
-              <Route path="/profile" element={<ProtectedRoute><div>Profile Page (Orders)</div></ProtectedRoute>} />
+              <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
               <Route path="/about" element={<div className="mx-auto max-w-3xl py-20 px-4">About LUXE.</div>} />
               <Route path="*" element={<Navigate to="/" />} />
             </Routes>

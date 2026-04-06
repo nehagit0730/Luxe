@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { collection, query, where, getDocs, limit } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Product } from '../types';
-import { formatPrice } from '../lib/utils';
+import { formatPrice, cn } from '../lib/utils';
 import { Button } from '../components/Button';
 import { useCartStore } from '../store/useCartStore';
 import { ShoppingCart, Heart, Share2, Truck, RotateCcw, ShieldCheck } from 'lucide-react';
@@ -169,5 +169,3 @@ export const ProductDetail = () => {
     </div>
   );
 };
-
-import { cn } from '../lib/utils';
