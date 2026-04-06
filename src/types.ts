@@ -7,6 +7,15 @@ export interface User {
   createdAt: string;
 }
 
+export interface ProductVariant {
+  id: string;
+  name: string;
+  price?: number;
+  stock: number;
+  sku?: string;
+  image?: string;
+}
+
 export interface Product {
   id: string;
   name: string;
@@ -21,6 +30,7 @@ export interface Product {
   category?: string;
   tags: string[];
   features?: string[];
+  variants?: ProductVariant[];
   isFeatured: boolean;
   status: 'active' | 'draft' | 'archived';
   createdAt: string;
@@ -98,6 +108,7 @@ export interface Page {
 export interface Menu {
   id: string;
   title: string;
+  handle: string;
   items: {
     label: string;
     url: string;

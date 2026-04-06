@@ -24,11 +24,20 @@ import {
   XCircle,
   ChevronRight,
   MoreVertical,
-  ArrowLeft
+  ArrowLeft,
+  ExternalLink,
+  GripVertical,
+  ChevronDown,
+  ChevronUp,
+  Menu as MenuIcon,
+  Check
 } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
 import { useAuthStore } from '../store/useAuthStore';
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
+import { Tooltip } from '../components/Tooltip';
+import { MediaPicker } from '../components/MediaPicker';
 import { cn, formatPrice } from '../lib/utils';
 import { auth, db } from '../firebase';
 import { signOut } from 'firebase/auth';
@@ -215,20 +224,37 @@ const AdminProducts = () => {
   }, []);
 
   const handleDelete = async (id: string) => {
-    if (window.confirm('Are you sure you want to delete this product?')) {
+    // User wants it to delete on click, but a small confirmation is safer.
+    // I'll use a simple confirm for now as requested "on click it delete the product"
+    // but I'll make it reactive.
+    try {
       await deleteDoc(doc(db, 'products', id));
-      setProducts(products.filter(p => p.id !== id));
+      setProducts(prev => prev.filter(p => p.id !== id));
+    } catch (err) {
+      console.error(err);
     }
   };
 
   const handleDuplicate = async (product: Product) => {
     const { id, ...rest } = product;
-    await addDoc(collection(db, 'products'), {
+    const newProduct = {
       ...rest,
       name: `${rest.name} (Copy)`,
+      slug: `${rest.slug}-copy-${Math.random().toString(36).substring(7)}`,
       createdAt: new Date().toISOString()
-    });
-    fetchProducts();
+    };
+    
+    // Optimistic update
+    const tempId = 'temp-' + Math.random();
+    setProducts(prev => [{ id: tempId, ...newProduct } as Product, ...prev]);
+    
+    try {
+      const docRef = await addDoc(collection(db, 'products'), newProduct);
+      setProducts(prev => prev.map(p => p.id === tempId ? { id: docRef.id, ...newProduct } as Product : p));
+    } catch (err) {
+      console.error(err);
+      setProducts(prev => prev.filter(p => p.id !== tempId));
+    }
   };
 
   if (isAdding || isEditing) {
@@ -295,9 +321,20 @@ const AdminProducts = () => {
                   </td>
                   <td className="px-6 py-4 text-right">
                     <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <Button variant="ghost" size="icon" className="rounded-full h-8 w-8" onClick={() => setIsEditing(product)}><Edit className="h-4 w-4" /></Button>
-                      <Button variant="ghost" size="icon" className="rounded-full h-8 w-8" onClick={() => handleDuplicate(product)}><Copy className="h-4 w-4" /></Button>
-                      <Button variant="ghost" size="icon" className="rounded-full h-8 w-8 text-red-600" onClick={() => handleDelete(product.id)}><Trash2 className="h-4 w-4" /></Button>
+                      <Tooltip content="Edit Product">
+                        <Button variant="ghost" size="icon" className="rounded-full h-8 w-8" onClick={() => setIsEditing(product)}><Edit className="h-4 w-4" /></Button>
+                      </Tooltip>
+                      <Tooltip content="View in Store">
+                        <Link to={`/product/${product.slug}`} target="_blank">
+                          <Button variant="ghost" size="icon" className="rounded-full h-8 w-8"><ExternalLink className="h-4 w-4" /></Button>
+                        </Link>
+                      </Tooltip>
+                      <Tooltip content="Duplicate">
+                        <Button variant="ghost" size="icon" className="rounded-full h-8 w-8" onClick={() => handleDuplicate(product)}><Copy className="h-4 w-4" /></Button>
+                      </Tooltip>
+                      <Tooltip content="Delete">
+                        <Button variant="ghost" size="icon" className="rounded-full h-8 w-8 text-red-600" onClick={() => handleDelete(product.id)}><Trash2 className="h-4 w-4" /></Button>
+                      </Tooltip>
                     </div>
                   </td>
                 </tr>
@@ -312,33 +349,46 @@ const AdminProducts = () => {
 
 const ProductForm = ({ product, onCancel, onSuccess }: { product: Product | null, onCancel: () => void, onSuccess: () => void }) => {
   const [loading, setLoading] = React.useState(false);
+  const [collections, setCollections] = React.useState<Category[]>([]);
+  const [showMediaPicker, setShowMediaPicker] = React.useState<{ activeIndex: number | null }>({ activeIndex: null });
+  const [showPreview, setShowPreview] = React.useState(false);
   const [formData, setFormData] = React.useState({
     name: product?.name || '',
     description: product?.description || '',
     price: product?.price || 0,
     stock: product?.stock || 0,
     sku: product?.sku || '',
-    images: product?.images || [''],
+    images: product?.images || [],
     categoryId: product?.categoryId || '',
     isFeatured: product?.isFeatured || false,
-    status: product?.status || 'active'
+    status: product?.status || 'active',
+    variants: product?.variants || [],
+    tags: product?.tags || []
   });
+
+  React.useEffect(() => {
+    const fetchCollections = async () => {
+      const snap = await getDocs(collection(db, 'categories'));
+      setCollections(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Category)));
+    };
+    fetchCollections();
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     try {
       const slug = formData.name.toLowerCase().replace(/\s+/g, '-').replace(/[^\w-]+/g, '');
+      const data = {
+        ...formData,
+        slug,
+        updatedAt: new Date().toISOString()
+      };
       if (product) {
-        await updateDoc(doc(db, 'products', product.id), {
-          ...formData,
-          slug,
-          updatedAt: new Date().toISOString()
-        });
+        await updateDoc(doc(db, 'products', product.id), data);
       } else {
         await addDoc(collection(db, 'products'), {
-          ...formData,
-          slug,
+          ...data,
           createdAt: new Date().toISOString()
         });
       }
@@ -350,16 +400,92 @@ const ProductForm = ({ product, onCancel, onSuccess }: { product: Product | null
     }
   };
 
+  const addVariant = () => {
+    setFormData({
+      ...formData,
+      variants: [...(formData.variants || []), { id: Math.random().toString(36).substring(7), name: '', price: formData.price, stock: 0, sku: '' }]
+    });
+  };
+
+  const removeVariant = (id: string) => {
+    setFormData({
+      ...formData,
+      variants: formData.variants?.filter(v => v.id !== id)
+    });
+  };
+
+  const updateVariant = (id: string, field: string, value: any) => {
+    setFormData({
+      ...formData,
+      variants: formData.variants?.map(v => v.id === id ? { ...v, [field]: value } : v)
+    });
+  };
+
+  if (showPreview) {
+    return (
+      <div className="space-y-8">
+        <div className="flex items-center justify-between">
+          <Button variant="ghost" onClick={() => setShowPreview(false)} className="rounded-full"><ArrowLeft className="mr-2 h-4 w-4" /> Back to Editor</Button>
+          <h2 className="text-2xl font-bold">Product Preview</h2>
+          <Button onClick={handleSubmit} isLoading={loading}>Save Product</Button>
+        </div>
+        <div className="bg-white rounded-3xl border p-12 shadow-sm">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
+            <div className="space-y-4">
+              <div className="aspect-[4/5] rounded-3xl overflow-hidden bg-gray-100 border">
+                <img src={formData.images[0] || 'https://picsum.photos/seed/placeholder/800/1000'} alt="" className="h-full w-full object-cover" />
+              </div>
+              <div className="grid grid-cols-4 gap-4">
+                {formData.images.slice(1).map((img, i) => (
+                  <div key={i} className="aspect-square rounded-xl overflow-hidden bg-gray-100 border">
+                    <img src={img} alt="" className="h-full w-full object-cover" />
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="space-y-6">
+              <div>
+                <h1 className="text-4xl font-bold text-black tracking-tight">{formData.name || 'Product Name'}</h1>
+                <p className="text-2xl font-bold text-gray-900 mt-2">{formatPrice(formData.price)}</p>
+              </div>
+              <p className="text-gray-500 leading-relaxed">{formData.description || 'No description provided.'}</p>
+              {formData.variants && formData.variants.length > 0 && (
+                <div className="space-y-4">
+                  <h4 className="font-bold text-sm uppercase tracking-widest text-gray-400">Variants</h4>
+                  <div className="flex flex-wrap gap-2">
+                    {formData.variants.map(v => (
+                      <button key={v.id} className="px-4 py-2 rounded-xl border-2 border-gray-100 font-bold text-sm hover:border-black transition-all">
+                        {v.name || 'Unnamed Variant'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <Button className="w-full h-14 rounded-2xl text-lg font-bold">Add to Cart</Button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="space-y-8 max-w-4xl mx-auto">
-      <div className="flex items-center gap-4">
-        <Button variant="ghost" size="icon" onClick={onCancel} className="rounded-full"><ArrowLeft className="h-6 w-6" /></Button>
-        <h1 className="text-3xl font-bold tracking-tight text-black">Add Product</h1>
+    <div className="space-y-8 max-w-5xl mx-auto">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <Button variant="ghost" size="icon" onClick={onCancel} className="rounded-full"><ArrowLeft className="h-6 w-6" /></Button>
+          <h1 className="text-3xl font-bold tracking-tight text-black">{product ? 'Edit Product' : 'Add Product'}</h1>
+        </div>
+        <div className="flex gap-3">
+          <Button variant="outline" onClick={() => setShowPreview(true)} className="rounded-full px-6">Preview</Button>
+          <Button onClick={handleSubmit} className="rounded-full px-8" isLoading={loading}>Save Product</Button>
+        </div>
       </div>
 
-      <form onSubmit={handleSubmit} className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        <div className="lg:col-span-2 space-y-6">
+      <form onSubmit={handleSubmit} className="grid grid-cols-1 lg:grid-cols-3 gap-8 pb-20">
+        <div className="lg:col-span-2 space-y-8">
           <div className="p-8 rounded-3xl border bg-white shadow-sm space-y-6">
+            <h3 className="text-lg font-bold">Basic Information</h3>
             <Input label="Product Name" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} required />
             <div className="space-y-1.5">
               <label className="text-sm font-medium text-gray-700">Description</label>
@@ -371,67 +497,103 @@ const ProductForm = ({ product, onCancel, onSuccess }: { product: Product | null
               />
             </div>
             <div className="grid grid-cols-2 gap-4">
-              <Input label="Price ($)" type="number" value={formData.price} onChange={e => setFormData({...formData, price: Number(e.target.value)})} required />
-              <Input label="Stock Quantity" type="number" value={formData.stock} onChange={e => setFormData({...formData, stock: Number(e.target.value)})} required />
+              <Input label="Base Price ($)" type="number" value={formData.price} onChange={e => setFormData({...formData, price: Number(e.target.value)})} required />
+              <Input label="Total Stock" type="number" value={formData.stock} onChange={e => setFormData({...formData, stock: Number(e.target.value)})} required />
             </div>
-            <Input label="SKU" value={formData.sku} onChange={e => setFormData({...formData, sku: e.target.value})} required />
+            <Input label="Base SKU" value={formData.sku} onChange={e => setFormData({...formData, sku: e.target.value})} required />
           </div>
 
           <div className="p-8 rounded-3xl border bg-white shadow-sm space-y-6">
-            <h3 className="font-bold">Media</h3>
-            <div className="grid grid-cols-3 gap-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-bold">Media</h3>
+              <Button type="button" variant="ghost" size="sm" onClick={() => setShowMediaPicker({ activeIndex: formData.images.length })} className="text-blue-600 font-bold">
+                <Plus className="mr-2 h-4 w-4" /> Add Media
+              </Button>
+            </div>
+            <div className="grid grid-cols-4 gap-4">
               {formData.images.map((img, i) => (
                 <div key={i} className="aspect-square rounded-2xl border-2 border-dashed flex items-center justify-center bg-gray-50 overflow-hidden relative group">
                   {img ? (
                     <>
                       <img src={img} alt="" className="h-full w-full object-cover" />
-                      <button className="absolute top-2 right-2 p-1 bg-white rounded-full shadow-sm opacity-0 group-hover:opacity-100 transition-opacity" onClick={() => {
-                        const newImgs = [...formData.images];
-                        newImgs[i] = '';
-                        setFormData({...formData, images: newImgs});
-                      }}><XCircle className="h-4 w-4 text-red-600" /></button>
+                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                        <button type="button" className="p-2 bg-white rounded-full shadow-sm hover:bg-gray-100" onClick={() => setShowMediaPicker({ activeIndex: i })}>
+                          <Edit className="h-4 w-4 text-black" />
+                        </button>
+                        <button type="button" className="p-2 bg-white rounded-full shadow-sm hover:bg-red-50" onClick={() => {
+                          const newImgs = [...formData.images];
+                          newImgs.splice(i, 1);
+                          setFormData({...formData, images: newImgs});
+                        }}><Trash2 className="h-4 w-4 text-red-600" /></button>
+                      </div>
                     </>
                   ) : (
-                    <div className="text-center p-4">
-                      <ImageIcon className="h-8 w-8 text-gray-300 mx-auto mb-2" />
-                      <p className="text-[10px] font-bold text-gray-400 uppercase">Add Image</p>
-                      <input 
-                        type="text" 
-                        placeholder="URL" 
-                        className="mt-2 w-full text-[10px] border-none bg-transparent focus:ring-0 text-center"
-                        onBlur={e => {
-                          const newImgs = [...formData.images];
-                          newImgs[i] = e.target.value;
-                          setFormData({...formData, images: newImgs});
-                        }}
-                      />
-                    </div>
+                    <button type="button" className="w-full h-full flex flex-col items-center justify-center" onClick={() => setShowMediaPicker({ activeIndex: i })}>
+                      <ImageIcon className="h-8 w-8 text-gray-300 mb-2" />
+                      <p className="text-[10px] font-bold text-gray-400 uppercase">Select</p>
+                    </button>
                   )}
                 </div>
               ))}
               <button 
                 type="button"
-                className="aspect-square rounded-2xl border-2 border-dashed flex items-center justify-center hover:bg-gray-50 transition-colors"
-                onClick={() => setFormData({...formData, images: [...formData.images, '']})}
+                className="aspect-square rounded-2xl border-2 border-dashed border-gray-200 flex items-center justify-center hover:bg-gray-50 transition-colors group"
+                onClick={() => setShowMediaPicker({ activeIndex: formData.images.length })}
               >
-                <Plus className="h-6 w-6 text-gray-300" />
+                <Plus className="h-6 w-6 text-gray-300 group-hover:text-black transition-colors" />
               </button>
             </div>
           </div>
+
+          <div className="p-8 rounded-3xl border bg-white shadow-sm space-y-6">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-bold">Variants</h3>
+              <Button type="button" variant="outline" size="sm" onClick={addVariant} className="rounded-full">
+                <Plus className="mr-2 h-4 w-4" /> Add Variant
+              </Button>
+            </div>
+            {formData.variants && formData.variants.length > 0 ? (
+              <div className="space-y-4">
+                {formData.variants.map((variant, i) => (
+                  <div key={variant.id} className="p-6 rounded-2xl border bg-gray-50/50 flex items-center gap-4 group">
+                    <div className="h-12 w-12 rounded-xl bg-white border flex items-center justify-center overflow-hidden cursor-pointer hover:border-black transition-all">
+                      {variant.image ? <img src={variant.image} className="h-full w-full object-cover" /> : <ImageIcon className="h-5 w-5 text-gray-300" />}
+                    </div>
+                    <div className="grid grid-cols-4 gap-4 flex-1">
+                      <Input placeholder="Variant Name (e.g. Red / M)" value={variant.name} onChange={e => updateVariant(variant.id, 'name', e.target.value)} />
+                      <Input placeholder="Price" type="number" value={variant.price} onChange={e => updateVariant(variant.id, 'price', Number(e.target.value))} />
+                      <Input placeholder="Stock" type="number" value={variant.stock} onChange={e => updateVariant(variant.id, 'stock', Number(e.target.value))} />
+                      <Input placeholder="SKU" value={variant.sku} onChange={e => updateVariant(variant.id, 'sku', e.target.value)} />
+                    </div>
+                    <Button variant="ghost" size="icon" className="text-red-600 opacity-0 group-hover:opacity-100" onClick={() => removeVariant(variant.id)}>
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-8 border-2 border-dashed rounded-2xl">
+                <p className="text-sm text-gray-400">No variants added. Add variants for size, color, etc.</p>
+              </div>
+            )}
+          </div>
         </div>
 
-        <div className="space-y-6">
+        <div className="space-y-8">
           <div className="p-8 rounded-3xl border bg-white shadow-sm space-y-6">
-            <h3 className="font-bold">Status</h3>
-            <select 
-              className="w-full rounded-xl border border-gray-300 p-3 text-sm focus:ring-2 focus:ring-black"
-              value={formData.status}
-              onChange={e => setFormData({...formData, status: e.target.value as 'active' | 'draft' | 'archived'})}
-            >
-              <option value="active">Active</option>
-              <option value="draft">Draft</option>
-              <option value="archived">Archived</option>
-            </select>
+            <h3 className="text-lg font-bold">Status & Visibility</h3>
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-gray-700">Product Status</label>
+              <select 
+                className="w-full rounded-xl border border-gray-300 p-3 text-sm focus:ring-2 focus:ring-black"
+                value={formData.status}
+                onChange={e => setFormData({...formData, status: e.target.value as 'active' | 'draft' | 'archived'})}
+              >
+                <option value="active">Active</option>
+                <option value="draft">Draft</option>
+                <option value="archived">Archived</option>
+              </select>
+            </div>
             <div className="flex items-center justify-between p-4 rounded-2xl bg-gray-50">
               <span className="text-sm font-medium">Featured Product</span>
               <input 
@@ -444,17 +606,43 @@ const ProductForm = ({ product, onCancel, onSuccess }: { product: Product | null
           </div>
 
           <div className="p-8 rounded-3xl border bg-white shadow-sm space-y-6">
-            <h3 className="font-bold">Organization</h3>
-            <Input label="Collection / Category" placeholder="Select..." />
-            <Input label="Tags" placeholder="Summer, New, Sale" />
-          </div>
-
-          <div className="flex gap-4">
-            <Button variant="outline" className="flex-1 rounded-full" onClick={onCancel}>Cancel</Button>
-            <Button className="flex-1 rounded-full" isLoading={loading}>Save Product</Button>
+            <h3 className="text-lg font-bold">Organization</h3>
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-gray-700">Collection</label>
+              <select 
+                className="w-full rounded-xl border border-gray-300 p-3 text-sm focus:ring-2 focus:ring-black"
+                value={formData.categoryId}
+                onChange={e => setFormData({...formData, categoryId: e.target.value})}
+              >
+                <option value="">Select Collection...</option>
+                {collections.map(c => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </div>
+            <Input label="Tags" placeholder="Summer, New, Sale" value={formData.tags?.join(', ')} onChange={e => setFormData({...formData, tags: e.target.value.split(',').map(t => t.trim())})} />
           </div>
         </div>
       </form>
+
+      <AnimatePresence>
+        {showMediaPicker.activeIndex !== null && (
+          <MediaPicker 
+            onClose={() => setShowMediaPicker({ activeIndex: null })}
+            onSelect={(url) => {
+              const newImgs = [...formData.images];
+              if (showMediaPicker.activeIndex! < newImgs.length) {
+                newImgs[showMediaPicker.activeIndex!] = url;
+              } else {
+                newImgs.push(url);
+              }
+              setFormData({ ...formData, images: newImgs });
+              setShowMediaPicker({ activeIndex: null });
+            }}
+            selectedUrls={formData.images}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 };
@@ -478,21 +666,34 @@ const AdminPages = () => {
   }, []);
 
   const handleDelete = async (id: string) => {
-    if (window.confirm('Are you sure you want to delete this page?')) {
+    try {
       await deleteDoc(doc(db, 'pages', id));
-      setPages(pages.filter(p => p.id !== id));
+      setPages(prev => prev.filter(p => p.id !== id));
+    } catch (err) {
+      console.error(err);
     }
   };
 
   const handleDuplicate = async (page: Page) => {
     const { id, ...rest } = page;
-    await addDoc(collection(db, 'pages'), {
+    const newPage = {
       ...rest,
       title: `${rest.title} (Copy)`,
-      slug: `${rest.slug}-copy`,
+      slug: `${rest.slug}-copy-${Math.random().toString(36).substring(7)}`,
       createdAt: new Date().toISOString()
-    });
-    fetchPages();
+    };
+    
+    // Optimistic update
+    const tempId = 'temp-' + Math.random();
+    setPages(prev => [{ id: tempId, ...newPage } as Page, ...prev]);
+    
+    try {
+      const docRef = await addDoc(collection(db, 'pages'), newPage);
+      setPages(prev => prev.map(p => p.id === tempId ? { id: docRef.id, ...newPage } as Page : p));
+    } catch (err) {
+      console.error(err);
+      setPages(prev => prev.filter(p => p.id !== tempId));
+    }
   };
 
   if (isAdding || isEditing) {
@@ -517,36 +718,60 @@ const AdminPages = () => {
         </Button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {pages.map(page => (
-          <div key={page.id} className="p-6 rounded-3xl border bg-white shadow-sm hover:shadow-md transition-all group">
-            <div className="flex items-center justify-between mb-4">
-              <div className="p-2 rounded-xl bg-gray-50"><FileText className="h-6 w-6 text-gray-400" /></div>
-              <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full" onClick={() => setIsEditing(page)}><Edit className="h-4 w-4" /></Button>
-                <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full" onClick={() => handleDuplicate(page)}><Copy className="h-4 w-4" /></Button>
-                <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full text-red-600" onClick={() => handleDelete(page.id)}><Trash2 className="h-4 w-4" /></Button>
-              </div>
-            </div>
-            <h3 className="font-bold text-lg text-black">{page.title}</h3>
-            <p className="text-xs text-gray-400 mt-1">/{page.slug}</p>
-            <div className="mt-6 flex items-center justify-between">
-              <span className="text-[10px] font-bold uppercase tracking-widest text-green-600 bg-green-50 px-2 py-1 rounded-full">Published</span>
-              <Button variant="ghost" size="sm" className="text-xs font-bold">Preview <Eye className="ml-2 h-3 w-3" /></Button>
-            </div>
-          </div>
-        ))}
-        
-        <button 
-          onClick={() => setIsAdding(true)}
-          className="p-6 rounded-3xl border-2 border-dashed border-gray-200 hover:border-black hover:bg-gray-50 transition-all flex flex-col items-center justify-center text-center group min-h-[200px]"
-        >
-          <div className="h-12 w-12 rounded-full bg-gray-100 flex items-center justify-center mb-4 group-hover:bg-black group-hover:text-white transition-colors">
-            <Plus className="h-6 w-6" />
-          </div>
-          <p className="font-bold text-black">Create New Page</p>
-          <p className="text-xs text-gray-400 mt-1">About, Contact, FAQ, etc.</p>
-        </button>
+      <div className="rounded-3xl border bg-white overflow-hidden shadow-sm">
+        <table className="w-full text-left">
+          <thead className="bg-gray-50 border-b">
+            <tr>
+              <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-gray-400">Page Title</th>
+              <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-gray-400">URL Slug</th>
+              <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-gray-400">Status</th>
+              <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-gray-400">Last Modified</th>
+              <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-gray-400 text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            {pages.map(page => (
+              <tr key={page.id} className="hover:bg-gray-50 transition-colors group">
+                <td className="px-6 py-4">
+                  <div className="flex items-center gap-3">
+                    <FileText className="h-5 w-5 text-gray-400" />
+                    <span className="text-sm font-bold text-black">{page.title}</span>
+                  </div>
+                </td>
+                <td className="px-6 py-4 text-sm text-gray-500">/{page.slug}</td>
+                <td className="px-6 py-4">
+                  <span className={cn(
+                    "inline-flex items-center rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-widest",
+                    page.status === 'published' ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-700"
+                  )}>
+                    {page.status || 'Draft'}
+                  </span>
+                </td>
+                <td className="px-6 py-4 text-sm text-gray-400">
+                  {new Date(page.createdAt).toLocaleDateString()}
+                </td>
+                <td className="px-6 py-4 text-right">
+                  <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <Tooltip content="Edit">
+                      <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full" onClick={() => setIsEditing(page)}><Edit className="h-4 w-4" /></Button>
+                    </Tooltip>
+                    <Tooltip content="Preview">
+                      <Link to={`/p/${page.slug}`} target="_blank">
+                        <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full"><Eye className="h-4 w-4" /></Button>
+                      </Link>
+                    </Tooltip>
+                    <Tooltip content="Duplicate">
+                      <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full" onClick={() => handleDuplicate(page)}><Copy className="h-4 w-4" /></Button>
+                    </Tooltip>
+                    <Tooltip content="Delete">
+                      <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full text-red-600" onClick={() => handleDelete(page.id)}><Trash2 className="h-4 w-4" /></Button>
+                    </Tooltip>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   );
@@ -554,9 +779,12 @@ const AdminPages = () => {
 
 const PageForm = ({ page, onCancel, onSuccess }: { page: Page | null, onCancel: () => void, onSuccess: () => void }) => {
   const [loading, setLoading] = React.useState(false);
+  const [activeSection, setActiveSection] = React.useState<number | null>(null);
+  const [showMediaPicker, setShowMediaPicker] = React.useState<{ sectionIndex: number, field: string } | null>(null);
   const [formData, setFormData] = React.useState({
     title: page?.title || '',
     slug: page?.slug || '',
+    status: page?.status || 'draft',
     sections: page?.sections || []
   });
 
@@ -564,14 +792,15 @@ const PageForm = ({ page, onCancel, onSuccess }: { page: Page | null, onCancel: 
     e.preventDefault();
     setLoading(true);
     try {
+      const data = {
+        ...formData,
+        updatedAt: new Date().toISOString()
+      };
       if (page) {
-        await updateDoc(doc(db, 'pages', page.id), {
-          ...formData,
-          updatedAt: new Date().toISOString()
-        });
+        await updateDoc(doc(db, 'pages', page.id), data);
       } else {
         await addDoc(collection(db, 'pages'), {
-          ...formData,
+          ...data,
           createdAt: new Date().toISOString()
         });
       }
@@ -584,34 +813,168 @@ const PageForm = ({ page, onCancel, onSuccess }: { page: Page | null, onCancel: 
   };
 
   const addSection = (type: string) => {
+    const newSection = { 
+      id: Math.random().toString(36).substring(7),
+      type, 
+      content: {
+        title: 'New Section',
+        text: 'Add your content here...',
+        image: ''
+      } 
+    };
     setFormData({
       ...formData,
-      sections: [...formData.sections, { type, content: {} }]
+      sections: [...formData.sections, newSection]
     });
+    setActiveSection(formData.sections.length);
   };
 
   const removeSection = (index: number) => {
     const newSections = [...formData.sections];
     newSections.splice(index, 1);
     setFormData({ ...formData, sections: newSections });
+    if (activeSection === index) setActiveSection(null);
+  };
+
+  const duplicateSection = (index: number) => {
+    const section = formData.sections[index];
+    const newSection = { ...section, id: Math.random().toString(36).substring(7) };
+    const newSections = [...formData.sections];
+    newSections.splice(index + 1, 0, newSection);
+    setFormData({ ...formData, sections: newSections });
+  };
+
+  const moveSection = (index: number, direction: 'up' | 'down') => {
+    const newSections = [...formData.sections];
+    const newIndex = direction === 'up' ? index - 1 : index + 1;
+    if (newIndex < 0 || newIndex >= newSections.length) return;
+    [newSections[index], newSections[newIndex]] = [newSections[newIndex], newSections[index]];
+    setFormData({ ...formData, sections: newSections });
+    if (activeSection === index) setActiveSection(newIndex);
+    else if (activeSection === newIndex) setActiveSection(index);
+  };
+
+  const updateSectionContent = (index: number, field: string, value: any) => {
+    const newSections = [...formData.sections];
+    newSections[index] = {
+      ...newSections[index],
+      content: { ...newSections[index].content, [field]: value }
+    };
+    setFormData({ ...formData, sections: newSections });
   };
 
   return (
-    <div className="space-y-8 max-w-5xl mx-auto">
+    <div className="space-y-8 max-w-6xl mx-auto pb-20">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
           <Button variant="ghost" size="icon" onClick={onCancel} className="rounded-full"><ArrowLeft className="h-6 w-6" /></Button>
           <h1 className="text-3xl font-bold tracking-tight text-black">{page ? 'Edit Page' : 'Create Page'}</h1>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={onCancel}>Cancel</Button>
-          <Button onClick={handleSubmit} isLoading={loading}>Save Page</Button>
+        <div className="flex gap-3">
+          <Button variant="outline" onClick={onCancel} className="rounded-full px-6">Cancel</Button>
+          <Button onClick={handleSubmit} className="rounded-full px-8" isLoading={loading}>Save Page</Button>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        <div className="lg:col-span-2 space-y-6">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+        <div className="lg:col-span-8 space-y-8">
           <div className="p-8 rounded-3xl border bg-white shadow-sm space-y-6">
+            <h3 className="text-lg font-bold">Page Structure</h3>
+            <div className="space-y-4">
+              {formData.sections.length === 0 ? (
+                <div className="p-12 border-2 border-dashed rounded-3xl text-center bg-gray-50">
+                  <LayoutTemplate className="h-12 w-12 text-gray-300 mx-auto mb-4" />
+                  <p className="text-gray-500 font-medium">Your page is empty</p>
+                  <p className="text-xs text-gray-400 mt-1">Add sections from the sidebar to start building</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {formData.sections.map((section, i) => (
+                    <div 
+                      key={section.id || i} 
+                      className={cn(
+                        "rounded-2xl border transition-all overflow-hidden",
+                        activeSection === i ? "border-black ring-4 ring-black/5" : "border-gray-100 bg-white"
+                      )}
+                    >
+                      <div 
+                        className="p-4 flex items-center justify-between cursor-pointer hover:bg-gray-50"
+                        onClick={() => setActiveSection(activeSection === i ? null : i)}
+                      >
+                        <div className="flex items-center gap-4">
+                          <div className="cursor-grab active:cursor-grabbing p-1 text-gray-300 hover:text-gray-600">
+                            <GripVertical className="h-5 w-5" />
+                          </div>
+                          <div className="h-10 w-10 rounded-xl bg-gray-100 flex items-center justify-center font-bold text-xs text-gray-400">{i + 1}</div>
+                          <div>
+                            <p className="font-bold text-black capitalize text-sm">{section.type.replace(/-/g, ' ')}</p>
+                            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">{section.content.title || 'Untitled Section'}</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={(e) => { e.stopPropagation(); moveSection(i, 'up'); }} disabled={i === 0}><Plus className="h-4 w-4 rotate-180" /></Button>
+                          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={(e) => { e.stopPropagation(); moveSection(i, 'down'); }} disabled={i === formData.sections.length - 1}><Plus className="h-4 w-4" /></Button>
+                          <div className="w-px h-4 bg-gray-200 mx-1" />
+                          <Tooltip content="Duplicate Section">
+                            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={(e) => { e.stopPropagation(); duplicateSection(i); }}><Copy className="h-4 w-4" /></Button>
+                          </Tooltip>
+                          <Tooltip content="Remove Section">
+                            <Button variant="ghost" size="icon" className="h-8 w-8 text-red-600" onClick={(e) => { e.stopPropagation(); removeSection(i); }}><Trash2 className="h-4 w-4" /></Button>
+                          </Tooltip>
+                        </div>
+                      </div>
+                      
+                      <AnimatePresence>
+                        {activeSection === i && (
+                          <motion.div 
+                            initial={{ height: 0, opacity: 0 }}
+                            animate={{ height: 'auto', opacity: 1 }}
+                            exit={{ height: 0, opacity: 0 }}
+                            className="border-t bg-gray-50/50 p-6 space-y-6"
+                          >
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                              <div className="space-y-4">
+                                <Input label="Section Title" value={section.content.title} onChange={e => updateSectionContent(i, 'title', e.target.value)} />
+                                <div className="space-y-1.5">
+                                  <label className="text-xs font-bold text-gray-400 uppercase tracking-widest">Content Text</label>
+                                  <textarea 
+                                    className="w-full rounded-xl border border-gray-300 p-3 text-sm focus:ring-2 focus:ring-black min-h-[100px]"
+                                    value={section.content.text}
+                                    onChange={e => updateSectionContent(i, 'text', e.target.value)}
+                                  />
+                                </div>
+                              </div>
+                              <div className="space-y-4">
+                                <label className="text-xs font-bold text-gray-400 uppercase tracking-widest">Section Image</label>
+                                <div 
+                                  className="aspect-video rounded-xl border-2 border-dashed flex flex-col items-center justify-center bg-white overflow-hidden cursor-pointer hover:bg-gray-50 transition-all group"
+                                  onClick={() => setShowMediaPicker({ sectionIndex: i, field: 'image' })}
+                                >
+                                  {section.content.image ? (
+                                    <img src={section.content.image} alt="" className="h-full w-full object-cover" />
+                                  ) : (
+                                    <>
+                                      <ImageIcon className="h-8 w-8 text-gray-200 mb-2" />
+                                      <p className="text-[10px] font-bold text-gray-400 uppercase">Select Image</p>
+                                    </>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="lg:col-span-4 space-y-8">
+          <div className="p-8 rounded-3xl border bg-white shadow-sm space-y-6">
+            <h3 className="text-lg font-bold">Page Settings</h3>
             <Input 
               label="Page Title" 
               value={formData.title} 
@@ -619,59 +982,63 @@ const PageForm = ({ page, onCancel, onSuccess }: { page: Page | null, onCancel: 
               required 
             />
             <Input label="URL Slug" value={formData.slug} onChange={e => setFormData({...formData, slug: e.target.value})} required />
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-gray-700">Status</label>
+              <select 
+                className="w-full rounded-xl border border-gray-300 p-3 text-sm focus:ring-2 focus:ring-black"
+                value={formData.status}
+                onChange={e => setFormData({...formData, status: e.target.value as 'draft' | 'published'})}
+              >
+                <option value="draft">Draft</option>
+                <option value="published">Published</option>
+              </select>
+            </div>
           </div>
 
-          <div className="space-y-4">
-            <h3 className="font-bold text-lg">Page Sections</h3>
-            {formData.sections.length === 0 ? (
-              <div className="p-12 border-2 border-dashed rounded-3xl text-center bg-white">
-                <LayoutTemplate className="h-12 w-12 text-gray-300 mx-auto mb-4" />
-                <p className="text-gray-500">No sections added yet. Start building your page!</p>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {formData.sections.map((section, i) => (
-                  <div key={i} className="p-6 rounded-2xl border bg-white shadow-sm flex items-center justify-between group">
-                    <div className="flex items-center gap-4">
-                      <div className="h-10 w-10 rounded-xl bg-gray-50 flex items-center justify-center font-bold text-xs text-gray-400">{i + 1}</div>
-                      <div>
-                        <p className="font-bold text-black capitalize">{section.type.replace(/-/g, ' ')}</p>
-                        <p className="text-xs text-gray-400">Click to edit content</p>
-                      </div>
-                    </div>
-                    <Button variant="ghost" size="icon" className="text-red-600 opacity-0 group-hover:opacity-100 transition-opacity" onClick={() => removeSection(i)}>
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div className="space-y-6">
           <div className="p-8 rounded-3xl border bg-white shadow-sm space-y-6">
-            <h3 className="font-bold">Add Section</h3>
+            <h3 className="text-lg font-bold">Add Section</h3>
             <div className="grid grid-cols-1 gap-2">
               {[
-                'banner', 'slideshow', 'image-with-text', 'richtext', 
-                'text-columns', 'image-columns', 'gallery', 'faq', 
-                'collection-list', 'product-featured', 'contact-form'
-              ].map(type => (
+                { type: 'hero', icon: LayoutTemplate },
+                { type: 'image-with-text', icon: ImageIcon },
+                { type: 'featured-collection', icon: Package },
+                { type: 'newsletter', icon: Bell },
+                { type: 'rich-text', icon: FileText },
+                { type: 'gallery', icon: ImageIcon },
+                { type: 'faq', icon: FileText }
+              ].map(item => (
                 <button 
-                  key={type}
+                  key={item.type}
                   type="button"
-                  onClick={() => addSection(type)}
-                  className="flex items-center justify-between p-3 rounded-xl border hover:border-black hover:bg-gray-50 transition-all text-left"
+                  onClick={() => addSection(item.type)}
+                  className="flex items-center justify-between p-4 rounded-2xl border hover:border-black hover:bg-gray-50 transition-all text-left group"
                 >
-                  <span className="text-sm font-medium capitalize">{type.replace(/-/g, ' ')}</span>
-                  <Plus className="h-4 w-4 text-gray-400" />
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 rounded-lg bg-gray-50 group-hover:bg-white transition-colors">
+                      <item.icon className="h-4 w-4 text-gray-400 group-hover:text-black" />
+                    </div>
+                    <span className="text-sm font-bold capitalize">{item.type.replace(/-/g, ' ')}</span>
+                  </div>
+                  <Plus className="h-4 w-4 text-gray-300 group-hover:text-black" />
                 </button>
               ))}
             </div>
           </div>
         </div>
       </div>
+
+      <AnimatePresence>
+        {showMediaPicker && (
+          <MediaPicker 
+            onClose={() => setShowMediaPicker(null)}
+            onSelect={(url) => {
+              updateSectionContent(showMediaPicker.sectionIndex, showMediaPicker.field, url);
+              setShowMediaPicker(null);
+            }}
+            selectedUrls={[]}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 };
@@ -701,6 +1068,28 @@ const AdminCollections = () => {
     }
   };
 
+  const handleDuplicate = async (collectionData: Category) => {
+    const { id, ...rest } = collectionData;
+    const newCollection = {
+      ...rest,
+      name: `${rest.name} (Copy)`,
+      slug: `${rest.slug}-copy-${Math.random().toString(36).substring(7)}`,
+      createdAt: new Date().toISOString()
+    };
+    
+    // Optimistic update
+    const tempId = 'temp-' + Math.random();
+    setCollections(prev => [{ id: tempId, ...newCollection } as Category, ...prev]);
+    
+    try {
+      const docRef = await addDoc(collection(db, 'categories'), newCollection);
+      setCollections(prev => prev.map(c => c.id === tempId ? { id: docRef.id, ...newCollection } as Category : c));
+    } catch (err) {
+      console.error(err);
+      setCollections(prev => prev.filter(c => c.id !== tempId));
+    }
+  };
+
   if (isAdding || isEditing) {
     return (
       <CollectionForm 
@@ -726,16 +1115,30 @@ const AdminCollections = () => {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {collections.map(cat => (
           <div key={cat.id} className="p-6 rounded-3xl border bg-white shadow-sm hover:shadow-md transition-all group">
-            <div className="aspect-video rounded-2xl bg-gray-100 mb-4 overflow-hidden border">
+            <div className="aspect-video rounded-2xl bg-gray-50 mb-4 overflow-hidden border relative">
               <img src={cat.image || `https://picsum.photos/seed/${cat.slug}/400/200`} alt="" className="h-full w-full object-cover" />
+              <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                <Tooltip content="View Collection">
+                  <Link to={`/category/${cat.slug}`} target="_blank">
+                    <Button variant="ghost" size="icon" className="h-10 w-10 rounded-full bg-white text-black hover:bg-gray-100"><ExternalLink className="h-5 w-5" /></Button>
+                  </Link>
+                </Tooltip>
+              </div>
             </div>
             <h3 className="font-bold text-lg text-black">{cat.name}</h3>
-            <p className="text-xs text-gray-400 mt-1 line-clamp-2">{cat.description}</p>
+            <p className="text-xs text-gray-400 mt-1 line-clamp-2">{cat.description || 'No description'}</p>
             <div className="mt-6 flex items-center justify-between">
               <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Collection</span>
-              <div className="flex gap-1">
-                <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full" onClick={() => setIsEditing(cat)}><Edit className="h-4 w-4" /></Button>
-                <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full text-red-600" onClick={() => handleDelete(cat.id)}><Trash2 className="h-4 w-4" /></Button>
+              <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <Tooltip content="Edit">
+                  <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full" onClick={() => setIsEditing(cat)}><Edit className="h-4 w-4" /></Button>
+                </Tooltip>
+                <Tooltip content="Duplicate">
+                  <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full" onClick={() => handleDuplicate(cat)}><Copy className="h-4 w-4" /></Button>
+                </Tooltip>
+                <Tooltip content="Delete">
+                  <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full text-red-600" onClick={() => handleDelete(cat.id)}><Trash2 className="h-4 w-4" /></Button>
+                </Tooltip>
               </div>
             </div>
           </div>
@@ -747,6 +1150,9 @@ const AdminCollections = () => {
 
 const CollectionForm = ({ collectionData, onCancel, onSuccess }: { collectionData: Category | null, onCancel: () => void, onSuccess: () => void }) => {
   const [loading, setLoading] = React.useState(false);
+  const [products, setProducts] = React.useState<Product[]>([]);
+  const [selectedProducts, setSelectedProducts] = React.useState<string[]>([]);
+  const [showMediaPicker, setShowMediaPicker] = React.useState(false);
   const [formData, setFormData] = React.useState({
     name: collectionData?.name || '',
     slug: collectionData?.slug || '',
@@ -754,21 +1160,47 @@ const CollectionForm = ({ collectionData, onCancel, onSuccess }: { collectionDat
     image: collectionData?.image || ''
   });
 
+  React.useEffect(() => {
+    const fetchData = async () => {
+      const pSnap = await getDocs(collection(db, 'products'));
+      const allProducts = pSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Product));
+      setProducts(allProducts);
+      
+      if (collectionData) {
+        setSelectedProducts(allProducts.filter(p => p.categoryId === collectionData.id).map(p => p.id));
+      }
+    };
+    fetchData();
+  }, [collectionData]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     try {
+      let collectionId = collectionData?.id;
       if (collectionData) {
         await updateDoc(doc(db, 'categories', collectionData.id), {
           ...formData,
           updatedAt: new Date().toISOString()
         });
       } else {
-        await addDoc(collection(db, 'categories'), {
+        const docRef = await addDoc(collection(db, 'categories'), {
           ...formData,
           createdAt: new Date().toISOString()
         });
+        collectionId = docRef.id;
       }
+
+      // Update products category association
+      // This is a bit simplified, ideally we'd use a batch or more robust logic
+      const productsToUpdate = products.filter(p => selectedProducts.includes(p.id) || p.categoryId === collectionId);
+      for (const p of productsToUpdate) {
+        const isSelected = selectedProducts.includes(p.id);
+        await updateDoc(doc(db, 'products', p.id), {
+          categoryId: isSelected ? collectionId : ''
+        });
+      }
+
       onSuccess();
     } catch (err) {
       console.error(err);
@@ -778,35 +1210,114 @@ const CollectionForm = ({ collectionData, onCancel, onSuccess }: { collectionDat
   };
 
   return (
-    <div className="space-y-8 max-w-2xl mx-auto">
-      <div className="flex items-center gap-4">
-        <Button variant="ghost" size="icon" onClick={onCancel} className="rounded-full"><ArrowLeft className="h-6 w-6" /></Button>
-        <h1 className="text-3xl font-bold tracking-tight text-black">{collectionData ? 'Edit Collection' : 'Add Collection'}</h1>
+    <div className="space-y-8 max-w-5xl mx-auto">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <Button variant="ghost" size="icon" onClick={onCancel} className="rounded-full"><ArrowLeft className="h-6 w-6" /></Button>
+          <h1 className="text-3xl font-bold tracking-tight text-black">{collectionData ? 'Edit Collection' : 'Add Collection'}</h1>
+        </div>
+        <div className="flex gap-3">
+          <Button variant="outline" onClick={onCancel} className="rounded-full px-6">Cancel</Button>
+          <Button onClick={handleSubmit} className="rounded-full px-8" isLoading={loading}>Save Collection</Button>
+        </div>
       </div>
 
-      <form onSubmit={handleSubmit} className="p-8 rounded-3xl border bg-white shadow-sm space-y-6">
-        <Input 
-          label="Collection Name" 
-          value={formData.name} 
-          onChange={e => setFormData({...formData, name: e.target.value, slug: e.target.value.toLowerCase().replace(/\s+/g, '-')})} 
-          required 
-        />
-        <Input label="Slug" value={formData.slug} onChange={e => setFormData({...formData, slug: e.target.value})} required />
-        <div className="space-y-1.5">
-          <label className="text-sm font-medium text-gray-700">Description</label>
-          <textarea 
-            className="w-full rounded-xl border border-gray-300 p-4 text-sm focus:ring-2 focus:ring-black min-h-[100px]"
-            value={formData.description}
-            onChange={e => setFormData({...formData, description: e.target.value})}
-          />
+      <form onSubmit={handleSubmit} className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <div className="lg:col-span-2 space-y-8">
+          <div className="p-8 rounded-3xl border bg-white shadow-sm space-y-6">
+            <h3 className="text-lg font-bold">Collection Details</h3>
+            <Input 
+              label="Collection Name" 
+              value={formData.name} 
+              onChange={e => setFormData({...formData, name: e.target.value, slug: e.target.value.toLowerCase().replace(/\s+/g, '-')})} 
+              required 
+            />
+            <Input label="Slug" value={formData.slug} onChange={e => setFormData({...formData, slug: e.target.value})} required />
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-gray-700">Description</label>
+              <textarea 
+                className="w-full rounded-xl border border-gray-300 p-4 text-sm focus:ring-2 focus:ring-black min-h-[150px]"
+                value={formData.description}
+                onChange={e => setFormData({...formData, description: e.target.value})}
+              />
+            </div>
+          </div>
+
+          <div className="p-8 rounded-3xl border bg-white shadow-sm space-y-6">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-bold">Products in Collection</h3>
+              <p className="text-sm text-gray-400">{selectedProducts.length} products selected</p>
+            </div>
+            <div className="max-h-[400px] overflow-y-auto pr-2 space-y-2 custom-scrollbar">
+              {products.map(product => (
+                <div 
+                  key={product.id} 
+                  className={cn(
+                    "flex items-center gap-4 p-3 rounded-2xl border cursor-pointer transition-all",
+                    selectedProducts.includes(product.id) ? "border-black bg-gray-50" : "border-gray-100 hover:border-gray-200"
+                  )}
+                  onClick={() => {
+                    setSelectedProducts(prev => 
+                      prev.includes(product.id) ? prev.filter(id => id !== product.id) : [...prev, product.id]
+                    );
+                  }}
+                >
+                  <div className="h-10 w-10 rounded-lg bg-gray-100 overflow-hidden">
+                    <img src={product.images[0]} alt="" className="h-full w-full object-cover" />
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-sm font-bold text-black">{product.name}</p>
+                    <p className="text-xs text-gray-400">{formatPrice(product.price)}</p>
+                  </div>
+                  <div className={cn(
+                    "h-5 w-5 rounded-full border-2 flex items-center justify-center transition-all",
+                    selectedProducts.includes(product.id) ? "bg-black border-black" : "border-gray-200"
+                  )}>
+                    {selectedProducts.includes(product.id) && <Check className="h-3 w-3 text-white" />}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
-        <Input label="Featured Image URL" value={formData.image} onChange={e => setFormData({...formData, image: e.target.value})} placeholder="https://..." />
-        
-        <div className="flex gap-4 pt-4">
-          <Button variant="outline" className="flex-1 rounded-full" onClick={onCancel}>Cancel</Button>
-          <Button className="flex-1 rounded-full" isLoading={loading}>Save Collection</Button>
+
+        <div className="space-y-8">
+          <div className="p-8 rounded-3xl border bg-white shadow-sm space-y-6">
+            <h3 className="text-lg font-bold">Featured Image</h3>
+            <div 
+              className="aspect-video rounded-2xl border-2 border-dashed flex flex-col items-center justify-center bg-gray-50 overflow-hidden cursor-pointer hover:bg-gray-100 transition-all group"
+              onClick={() => setShowMediaPicker(true)}
+            >
+              {formData.image ? (
+                <div className="relative w-full h-full">
+                  <img src={formData.image} alt="" className="h-full w-full object-cover" />
+                  <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                    <Button variant="ghost" size="sm" className="bg-white text-black">Change Image</Button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <ImageIcon className="h-10 w-10 text-gray-300 mb-2" />
+                  <p className="text-xs font-bold text-gray-400 uppercase">Select Image</p>
+                </>
+              )}
+            </div>
+          </div>
         </div>
       </form>
+
+      <AnimatePresence>
+        {showMediaPicker && (
+          <MediaPicker 
+            onClose={() => setShowMediaPicker(false)}
+            onSelect={(url) => {
+              setFormData({ ...formData, image: url });
+              setShowMediaPicker(false);
+            }}
+            selectedUrls={[formData.image]}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 };
@@ -918,17 +1429,18 @@ const AdminCustomers = () => {
 const AdminAppearance = () => {
   const [activeTab, setActiveTab] = React.useState<'header' | 'footer' | 'theme'>('header');
   const [settings, setSettings] = React.useState<any>(null);
+  const [menus, setMenus] = React.useState<Menu[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [saving, setSaving] = React.useState(false);
+  const [showMediaPicker, setShowMediaPicker] = React.useState<{ tab: string, field: string } | null>(null);
 
   React.useEffect(() => {
-    const fetchSettings = async () => {
+    const fetchData = async () => {
       const docRef = doc(db, 'settings', 'appearance');
       const docSnap = await getDoc(docRef);
       if (docSnap.exists()) {
         setSettings(docSnap.data());
       } else {
-        // Default settings
         setSettings({
           header: {
             logo: '',
@@ -939,6 +1451,7 @@ const AdminAppearance = () => {
             textColor: '#000000'
           },
           footer: {
+            logo: '',
             backgroundColor: '#f9fafb',
             textColor: '#000000',
             copyright: '© 2026 Your Store. All rights reserved.',
@@ -952,16 +1465,19 @@ const AdminAppearance = () => {
           }
         });
       }
+
+      const mSnap = await getDocs(collection(db, 'menus'));
+      setMenus(mSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Menu)));
       setLoading(false);
     };
-    fetchSettings();
+    fetchData();
   }, []);
 
   const handleSave = async () => {
     setSaving(true);
     try {
       await setDoc(doc(db, 'settings', 'appearance'), settings);
-      alert('Settings saved successfully!');
+      // alert('Settings saved successfully!');
     } catch (err) {
       console.error(err);
     } finally {
@@ -983,8 +1499,8 @@ const AdminAppearance = () => {
         </Button>
       </div>
 
-      <div className="flex gap-8">
-        <div className="w-64 space-y-2">
+      <div className="flex flex-col lg:flex-row gap-8">
+        <div className="w-full lg:w-64 space-y-2">
           {[
             { id: 'header', label: 'Header', icon: LayoutTemplate },
             { id: 'footer', label: 'Footer', icon: LayoutTemplate },
@@ -1008,13 +1524,37 @@ const AdminAppearance = () => {
           {activeTab === 'header' && (
             <div className="p-8 rounded-3xl border bg-white shadow-sm space-y-8">
               <h3 className="text-xl font-bold">Header Configuration</h3>
-              <div className="grid grid-cols-1 gap-6">
-                <Input 
-                  label="Logo URL" 
-                  value={settings.header.logo} 
-                  onChange={e => setSettings({...settings, header: {...settings.header, logo: e.target.value}})} 
-                />
-                <div className="grid grid-cols-2 gap-6">
+              <div className="grid grid-cols-1 gap-8">
+                <div className="space-y-4">
+                  <label className="text-xs font-bold text-gray-400 uppercase tracking-widest">Logo</label>
+                  <div 
+                    className="h-24 w-48 rounded-2xl border-2 border-dashed flex flex-col items-center justify-center bg-gray-50 overflow-hidden cursor-pointer hover:bg-gray-100 transition-all group"
+                    onClick={() => setShowMediaPicker({ tab: 'header', field: 'logo' })}
+                  >
+                    {settings.header.logo ? (
+                      <img src={settings.header.logo} alt="" className="h-full w-full object-contain p-4" />
+                    ) : (
+                      <>
+                        <ImageIcon className="h-8 w-8 text-gray-300 mb-1" />
+                        <p className="text-[10px] font-bold text-gray-400 uppercase">Select Logo</p>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  <label className="text-xs font-bold text-gray-400 uppercase tracking-widest">Navigation Menu</label>
+                  <select 
+                    className="w-full rounded-xl border border-gray-300 p-3 text-sm focus:ring-2 focus:ring-black"
+                    value={settings.header.menuId}
+                    onChange={e => setSettings({...settings, header: {...settings.header, menuId: e.target.value}})}
+                  >
+                    <option value="">Select a menu</option>
+                    {menus.map(menu => <option key={menu.id} value={menu.id}>{menu.title}</option>)}
+                  </select>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <Input 
                     label="Background Color" 
                     type="color" 
@@ -1028,8 +1568,12 @@ const AdminAppearance = () => {
                     onChange={e => setSettings({...settings, header: {...settings.header, textColor: e.target.value}})} 
                   />
                 </div>
-                <div className="flex items-center justify-between p-4 rounded-2xl bg-gray-50">
-                  <span className="text-sm font-medium">Sticky Header</span>
+
+                <div className="flex items-center justify-between p-6 rounded-2xl bg-gray-50">
+                  <div>
+                    <p className="text-sm font-bold">Sticky Header</p>
+                    <p className="text-xs text-gray-400">Header stays at the top while scrolling</p>
+                  </div>
                   <button 
                     onClick={() => setSettings({...settings, header: {...settings.header, sticky: !settings.header.sticky}})}
                     className={`h-6 w-11 rounded-full transition-colors relative ${settings.header.sticky ? 'bg-black' : 'bg-gray-200'}`}
@@ -1044,8 +1588,37 @@ const AdminAppearance = () => {
           {activeTab === 'footer' && (
             <div className="p-8 rounded-3xl border bg-white shadow-sm space-y-8">
               <h3 className="text-xl font-bold">Footer Configuration</h3>
-              <div className="grid grid-cols-1 gap-6">
-                <div className="grid grid-cols-2 gap-6">
+              <div className="grid grid-cols-1 gap-8">
+                <div className="space-y-4">
+                  <label className="text-xs font-bold text-gray-400 uppercase tracking-widest">Footer Logo</label>
+                  <div 
+                    className="h-24 w-48 rounded-2xl border-2 border-dashed flex flex-col items-center justify-center bg-gray-50 overflow-hidden cursor-pointer hover:bg-gray-100 transition-all group"
+                    onClick={() => setShowMediaPicker({ tab: 'footer', field: 'logo' })}
+                  >
+                    {settings.footer.logo ? (
+                      <img src={settings.footer.logo} alt="" className="h-full w-full object-contain p-4" />
+                    ) : (
+                      <>
+                        <ImageIcon className="h-8 w-8 text-gray-300 mb-1" />
+                        <p className="text-[10px] font-bold text-gray-400 uppercase">Select Logo</p>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  <label className="text-xs font-bold text-gray-400 uppercase tracking-widest">Footer Menu</label>
+                  <select 
+                    className="w-full rounded-xl border border-gray-300 p-3 text-sm focus:ring-2 focus:ring-black"
+                    value={settings.footer.menuId}
+                    onChange={e => setSettings({...settings, footer: {...settings.footer, menuId: e.target.value}})}
+                  >
+                    <option value="">Select a menu</option>
+                    {menus.map(menu => <option key={menu.id} value={menu.id}>{menu.title}</option>)}
+                  </select>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <Input 
                     label="Background Color" 
                     type="color" 
@@ -1059,13 +1632,18 @@ const AdminAppearance = () => {
                     onChange={e => setSettings({...settings, footer: {...settings.footer, textColor: e.target.value}})} 
                   />
                 </div>
+
                 <Input 
                   label="Copyright Text" 
                   value={settings.footer.copyright} 
                   onChange={e => setSettings({...settings, footer: {...settings.footer, copyright: e.target.value}})} 
                 />
-                <div className="flex items-center justify-between p-4 rounded-2xl bg-gray-50">
-                  <span className="text-sm font-medium">Show Newsletter Signup</span>
+
+                <div className="flex items-center justify-between p-6 rounded-2xl bg-gray-50">
+                  <div>
+                    <p className="text-sm font-bold">Newsletter Signup</p>
+                    <p className="text-xs text-gray-400">Show newsletter form in footer</p>
+                  </div>
                   <button 
                     onClick={() => setSettings({...settings, footer: {...settings.footer, showNewsletter: !settings.footer.showNewsletter}})}
                     className={`h-6 w-11 rounded-full transition-colors relative ${settings.footer.showNewsletter ? 'bg-black' : 'bg-gray-200'}`}
@@ -1080,25 +1658,48 @@ const AdminAppearance = () => {
           {activeTab === 'theme' && (
             <div className="p-8 rounded-3xl border bg-white shadow-sm space-y-8">
               <h3 className="text-xl font-bold">Theme Settings</h3>
-              <div className="grid grid-cols-1 gap-6">
+              <div className="grid grid-cols-1 gap-8">
                 <Input 
                   label="Primary Brand Color" 
                   type="color" 
                   value={settings.theme.primaryColor} 
                   onChange={e => setSettings({...settings, theme: {...settings.theme, primaryColor: e.target.value}})} 
                 />
-                <div className="space-y-1.5">
-                  <label className="text-sm font-medium text-gray-700">Border Radius (rem)</label>
+                
+                <div className="space-y-4">
+                  <label className="text-xs font-bold text-gray-400 uppercase tracking-widest">Border Radius</label>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    {[
+                      { label: 'Sharp', value: '0px' },
+                      { label: 'Small', value: '0.5rem' },
+                      { label: 'Medium', value: '1rem' },
+                      { label: 'Large', value: '1.5rem' }
+                    ].map(radius => (
+                      <button
+                        key={radius.value}
+                        onClick={() => setSettings({...settings, theme: {...settings.theme, borderRadius: radius.value}})}
+                        className={cn(
+                          "p-4 rounded-2xl border text-sm font-bold transition-all",
+                          settings.theme.borderRadius === radius.value ? "border-black bg-black text-white" : "border-gray-100 hover:border-gray-200"
+                        )}
+                      >
+                        {radius.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  <label className="text-xs font-bold text-gray-400 uppercase tracking-widest">Font Family</label>
                   <select 
                     className="w-full rounded-xl border border-gray-300 p-3 text-sm focus:ring-2 focus:ring-black"
-                    value={settings.theme.borderRadius}
-                    onChange={e => setSettings({...settings, theme: {...settings.theme, borderRadius: e.target.value}})}
+                    value={settings.theme.fontFamily}
+                    onChange={e => setSettings({...settings, theme: {...settings.theme, fontFamily: e.target.value}})}
                   >
-                    <option value="0">None (Sharp)</option>
-                    <option value="0.5rem">Small</option>
-                    <option value="1rem">Medium</option>
-                    <option value="1.5rem">Large (Default)</option>
-                    <option value="2rem">Extra Large</option>
+                    <option value="Inter">Inter (Modern Sans)</option>
+                    <option value="Outfit">Outfit (Geometric Sans)</option>
+                    <option value="Space Grotesk">Space Grotesk (Tech Mono)</option>
+                    <option value="Playfair Display">Playfair Display (Elegant Serif)</option>
                   </select>
                 </div>
               </div>
@@ -1106,6 +1707,23 @@ const AdminAppearance = () => {
           )}
         </div>
       </div>
+
+      <AnimatePresence>
+        {showMediaPicker && (
+          <MediaPicker 
+            onClose={() => setShowMediaPicker(null)}
+            onSelect={(url) => {
+              const { tab, field } = showMediaPicker;
+              setSettings({
+                ...settings,
+                [tab]: { ...settings[tab], [field]: url }
+              });
+              setShowMediaPicker(null);
+            }}
+            selectedUrls={[]}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 };
@@ -1129,9 +1747,11 @@ const AdminNavigation = () => {
   }, []);
 
   const handleDelete = async (id: string) => {
-    if (window.confirm('Are you sure you want to delete this menu?')) {
+    try {
       await deleteDoc(doc(db, 'menus', id));
-      setMenus(menus.filter(m => m.id !== id));
+      setMenus(prev => prev.filter(m => m.id !== id));
+    } catch (err) {
+      console.error(err);
     }
   };
 
@@ -1161,10 +1781,14 @@ const AdminNavigation = () => {
         {menus.map(menu => (
           <div key={menu.id} className="p-8 rounded-3xl border bg-white shadow-sm hover:shadow-md transition-all group">
             <div className="flex items-center justify-between mb-6">
-              <div className="p-3 rounded-2xl bg-gray-50"><Navigation className="h-6 w-6 text-gray-400" /></div>
+              <div className="p-3 rounded-2xl bg-gray-50"><MenuIcon className="h-6 w-6 text-gray-400" /></div>
               <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full" onClick={() => setIsEditing(menu)}><Edit className="h-4 w-4" /></Button>
-                <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full text-red-600" onClick={() => handleDelete(menu.id)}><Trash2 className="h-4 w-4" /></Button>
+                <Tooltip content="Edit">
+                  <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full" onClick={() => setIsEditing(menu)}><Edit className="h-4 w-4" /></Button>
+                </Tooltip>
+                <Tooltip content="Delete">
+                  <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full text-red-600" onClick={() => handleDelete(menu.id)}><Trash2 className="h-4 w-4" /></Button>
+                </Tooltip>
               </div>
             </div>
             <h3 className="font-bold text-xl text-black">{menu.title}</h3>
@@ -1189,6 +1813,7 @@ const MenuForm = ({ menu, onCancel, onSuccess }: { menu: Menu | null, onCancel: 
   const [loading, setLoading] = React.useState(false);
   const [formData, setFormData] = React.useState({
     title: menu?.title || '',
+    handle: menu?.handle || '',
     items: menu?.items || []
   });
 
@@ -1235,47 +1860,63 @@ const MenuForm = ({ menu, onCancel, onSuccess }: { menu: Menu | null, onCancel: 
   };
 
   return (
-    <div className="space-y-8 max-w-3xl mx-auto">
-      <div className="flex items-center gap-4">
-        <Button variant="ghost" size="icon" onClick={onCancel} className="rounded-full"><ArrowLeft className="h-6 w-6" /></Button>
-        <h1 className="text-3xl font-bold tracking-tight text-black">{menu ? 'Edit Menu' : 'Add Menu'}</h1>
+    <div className="space-y-8 max-w-4xl mx-auto pb-20">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <Button variant="ghost" size="icon" onClick={onCancel} className="rounded-full"><ArrowLeft className="h-6 w-6" /></Button>
+          <h1 className="text-3xl font-bold tracking-tight text-black">{menu ? 'Edit Menu' : 'Add Menu'}</h1>
+        </div>
+        <div className="flex gap-3">
+          <Button variant="outline" onClick={onCancel} className="rounded-full px-6">Cancel</Button>
+          <Button onClick={handleSubmit} className="rounded-full px-8" isLoading={loading}>Save Menu</Button>
+        </div>
       </div>
 
-      <div className="p-8 rounded-3xl border bg-white shadow-sm space-y-8">
-        <Input 
-          label="Menu Title" 
-          value={formData.title} 
-          onChange={e => setFormData({...formData, title: e.target.value})} 
-          required 
-          placeholder="e.g. Main Menu, Footer Links"
-        />
-
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="font-bold">Menu Items</h3>
-            <Button variant="ghost" size="sm" onClick={addItem} className="text-xs font-bold"><Plus className="mr-2 h-3 w-3" /> Add Item</Button>
-          </div>
-          
-          <div className="space-y-3">
-            {formData.items.map((item, i) => (
-              <div key={i} className="flex items-end gap-4 p-4 rounded-2xl bg-gray-50 group">
-                <div className="flex-1">
-                  <Input label="Label" value={item.label} onChange={e => updateItem(i, 'label', e.target.value)} placeholder="Home" />
-                </div>
-                <div className="flex-1">
-                  <Input label="URL" value={item.url} onChange={e => updateItem(i, 'url', e.target.value)} placeholder="/" />
-                </div>
-                <Button variant="ghost" size="icon" className="text-red-600 mb-1" onClick={() => removeItem(i)}>
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </div>
-            ))}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+        <div className="md:col-span-1 space-y-6">
+          <div className="p-8 rounded-3xl border bg-white shadow-sm space-y-6">
+            <h3 className="text-lg font-bold">Menu Settings</h3>
+            <Input 
+              label="Menu Title" 
+              value={formData.title} 
+              onChange={e => setFormData({...formData, title: e.target.value, handle: e.target.value.toLowerCase().replace(/\s+/g, '-')})} 
+              required 
+              placeholder="e.g. Main Menu, Footer Links"
+            />
+            <Input label="Handle" value={formData.handle} onChange={e => setFormData({...formData, handle: e.target.value})} required />
           </div>
         </div>
 
-        <div className="flex gap-4 pt-4 border-t">
-          <Button variant="outline" className="flex-1 rounded-full" onClick={onCancel}>Cancel</Button>
-          <Button className="flex-1 rounded-full" onClick={handleSubmit} isLoading={loading}>Save Menu</Button>
+        <div className="md:col-span-2 space-y-6">
+          <div className="p-8 rounded-3xl border bg-white shadow-sm space-y-6">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-bold">Menu Items</h3>
+              <Button variant="ghost" size="sm" onClick={addItem} className="text-xs font-bold"><Plus className="mr-2 h-3 w-3" /> Add Item</Button>
+            </div>
+            
+            <div className="space-y-3">
+              {formData.items.length === 0 ? (
+                <div className="p-12 border-2 border-dashed rounded-3xl text-center bg-gray-50">
+                  <p className="text-gray-400 text-sm">No items in this menu yet.</p>
+                </div>
+              ) : (
+                formData.items.map((item, i) => (
+                  <div key={i} className="p-6 rounded-2xl border bg-gray-50/50 space-y-4 group">
+                    <div className="flex items-center gap-4">
+                      <div className="cursor-grab p-1 text-gray-300"><GripVertical className="h-5 w-5" /></div>
+                      <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <Input label="Label" value={item.label} onChange={e => updateItem(i, 'label', e.target.value)} placeholder="Home" />
+                        <Input label="URL" value={item.url} onChange={e => updateItem(i, 'url', e.target.value)} placeholder="/" />
+                      </div>
+                      <Button variant="ghost" size="icon" className="text-red-600 self-end mb-1" onClick={() => removeItem(i)}>
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
         </div>
       </div>
     </div>
