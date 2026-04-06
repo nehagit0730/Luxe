@@ -36,27 +36,38 @@ export const MediaPicker: React.FC<MediaPickerProps> = ({ onSelect, onClose, all
     const file = e.target.files?.[0];
     if (!file) return;
 
+    if (file.size > 800 * 1024) {
+      alert('File is too large. Please upload an image smaller than 800KB (Firestore limit for base64).');
+      return;
+    }
+
     setUploading(true);
     try {
       const reader = new FileReader();
       reader.onloadend = async () => {
-        const base64 = reader.result as string;
-        const newMedia = {
-          name: file.name,
-          url: base64, // Storing as base64 for now
-          type: file.type,
-          size: file.size,
-          createdAt: new Date().toISOString()
-        };
-        const docRef = await addDoc(collection(db, 'media'), newMedia);
-        const mediaItem = { id: docRef.id, ...newMedia } as Media;
-        setMedia([mediaItem, ...media]);
-        setView('grid');
+        try {
+          const base64 = reader.result as string;
+          const newMedia = {
+            name: file.name,
+            url: base64,
+            type: file.type,
+            size: file.size,
+            createdAt: new Date().toISOString()
+          };
+          const docRef = await addDoc(collection(db, 'media'), newMedia);
+          const mediaItem = { id: docRef.id, ...newMedia } as Media;
+          setMedia(prev => [mediaItem, ...prev]);
+          setView('grid');
+        } catch (err) {
+          console.error('Error adding media to Firestore:', err);
+          alert('Failed to save image. It might be too large for Firestore storage.');
+        } finally {
+          setUploading(false);
+        }
       };
       reader.readAsDataURL(file);
     } catch (err) {
-      console.error(err);
-    } finally {
+      console.error('Error reading file:', err);
       setUploading(false);
     }
   };

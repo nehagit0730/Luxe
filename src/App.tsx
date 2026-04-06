@@ -16,6 +16,7 @@ import { OrderConfirmation } from './pages/OrderConfirmation';
 import { Profile } from './pages/Profile';
 import { AdminLayout } from './pages/Admin';
 import { AdminLogin } from './pages/AdminLogin';
+import { DynamicPage } from './pages/DynamicPage';
 import { User } from './types';
 
 const ProtectedRoute = ({ children, adminOnly = false }: { children: React.ReactNode, adminOnly?: boolean }) => {
@@ -94,6 +95,7 @@ export default function App() {
               <Route path="/login" element={<Login />} />
               <Route path="/register" element={<Register />} />
               <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
+              <Route path="/pages/:slug" element={<DynamicPage />} />
               <Route path="/about" element={<div className="mx-auto max-w-3xl py-20 px-4">About LUXE.</div>} />
               <Route path="*" element={<Navigate to="/" />} />
             </Routes>

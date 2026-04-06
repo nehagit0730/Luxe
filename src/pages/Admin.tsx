@@ -32,7 +32,7 @@ import {
   Menu as MenuIcon,
   Check
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence, Reorder, useDragControls } from 'motion/react';
 import { useAuthStore } from '../store/useAuthStore';
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
@@ -756,7 +756,7 @@ const AdminPages = () => {
                       <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full" onClick={() => setIsEditing(page)}><Edit className="h-4 w-4" /></Button>
                     </Tooltip>
                     <Tooltip content="Preview">
-                      <Link to={`/p/${page.slug}`} target="_blank">
+                      <Link to={`/pages/${page.slug}`} target="_blank">
                         <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full"><Eye className="h-4 w-4" /></Button>
                       </Link>
                     </Tooltip>
@@ -781,6 +781,7 @@ const PageForm = ({ page, onCancel, onSuccess }: { page: Page | null, onCancel: 
   const [loading, setLoading] = React.useState(false);
   const [activeSection, setActiveSection] = React.useState<number | null>(null);
   const [showMediaPicker, setShowMediaPicker] = React.useState<{ sectionIndex: number, field: string } | null>(null);
+  const controls = useDragControls();
   const [formData, setFormData] = React.useState({
     title: page?.title || '',
     slug: page?.slug || '',
@@ -888,10 +889,18 @@ const PageForm = ({ page, onCancel, onSuccess }: { page: Page | null, onCancel: 
                   <p className="text-xs text-gray-400 mt-1">Add sections from the sidebar to start building</p>
                 </div>
               ) : (
-                <div className="space-y-4">
+                <Reorder.Group 
+                  axis="y" 
+                  values={formData.sections} 
+                  onReorder={(newSections) => setFormData({ ...formData, sections: newSections })}
+                  className="space-y-4"
+                >
                   {formData.sections.map((section, i) => (
-                    <div 
-                      key={section.id || i} 
+                    <Reorder.Item 
+                      key={section.id} 
+                      value={section}
+                      dragListener={false}
+                      dragControls={controls}
                       className={cn(
                         "rounded-2xl border transition-all overflow-hidden",
                         activeSection === i ? "border-black ring-4 ring-black/5" : "border-gray-100 bg-white"
@@ -902,7 +911,10 @@ const PageForm = ({ page, onCancel, onSuccess }: { page: Page | null, onCancel: 
                         onClick={() => setActiveSection(activeSection === i ? null : i)}
                       >
                         <div className="flex items-center gap-4">
-                          <div className="cursor-grab active:cursor-grabbing p-1 text-gray-300 hover:text-gray-600">
+                          <div 
+                            className="cursor-grab active:cursor-grabbing p-1 text-gray-300 hover:text-gray-600"
+                            onPointerDown={(e) => controls.start(e)}
+                          >
                             <GripVertical className="h-5 w-5" />
                           </div>
                           <div className="h-10 w-10 rounded-xl bg-gray-100 flex items-center justify-center font-bold text-xs text-gray-400">{i + 1}</div>
@@ -964,9 +976,9 @@ const PageForm = ({ page, onCancel, onSuccess }: { page: Page | null, onCancel: 
                           </motion.div>
                         )}
                       </AnimatePresence>
-                    </div>
+                    </Reorder.Item>
                   ))}
-                </div>
+                </Reorder.Group>
               )}
             </div>
           </div>
@@ -1035,7 +1047,7 @@ const PageForm = ({ page, onCancel, onSuccess }: { page: Page | null, onCancel: 
               updateSectionContent(showMediaPicker.sectionIndex, showMediaPicker.field, url);
               setShowMediaPicker(null);
             }}
-            selectedUrls={[]}
+            selectedUrls={formData.sections[showMediaPicker.sectionIndex]?.content[showMediaPicker.field] ? [formData.sections[showMediaPicker.sectionIndex].content[showMediaPicker.field]] : []}
           />
         )}
       </AnimatePresence>
@@ -1720,7 +1732,7 @@ const AdminAppearance = () => {
               });
               setShowMediaPicker(null);
             }}
-            selectedUrls={[]}
+            selectedUrls={settings[showMediaPicker.tab]?.[showMediaPicker.field] ? [settings[showMediaPicker.tab][showMediaPicker.field]] : []}
           />
         )}
       </AnimatePresence>
