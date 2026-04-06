@@ -116,3 +116,32 @@ export interface Menu {
     children?: any[];
   }[];
 }
+
+export interface SiteSettings {
+  id: string;
+  general: {
+    siteName: string;
+    logo?: string;
+    favicon?: string;
+    homepageSlug: string;
+  };
+  header: {
+    menuId?: string;
+    showSearch: boolean;
+    sticky: boolean;
+  };
+  footer: {
+    copyright: string;
+    showAdminLogin: boolean;
+    columns: {
+      title: string;
+      items: { label: string; url: string }[];
+    }[];
+    socialLinks: { platform: string; url: string }[];
+  };
+  theme: {
+    primaryColor: string;
+    fontFamily: string;
+    borderRadius: string;
+  };
+}

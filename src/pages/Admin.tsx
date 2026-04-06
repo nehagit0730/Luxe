@@ -34,6 +34,257 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence, Reorder, useDragControls } from 'motion/react';
 import { useAuthStore } from '../store/useAuthStore';
+import { useSettingsStore } from '../store/useSettingsStore';
+
+const AdminSettings = ({ initialTab = 'general' }: { initialTab?: 'general' | 'header' | 'footer' | 'theme' }) => {
+  const { settings, updateSettings } = useSettingsStore();
+  const [activeTab, setActiveTab] = React.useState<'general' | 'header' | 'footer' | 'theme'>(initialTab);
+  const [menus, setMenus] = React.useState<Menu[]>([]);
+  const [saving, setSaving] = React.useState(false);
+
+  React.useEffect(() => {
+    const fetchMenus = async () => {
+      const snap = await getDocs(collection(db, 'menus'));
+      setMenus(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Menu)));
+    };
+    fetchMenus();
+  }, []);
+
+  const handleSave = async (data: any) => {
+    setSaving(true);
+    try {
+      await updateSettings(data);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!settings) return null;
+
+  return (
+    <div className="space-y-8">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-black">Site Settings</h1>
+          <p className="text-sm text-gray-500">Manage your site's global configuration and appearance.</p>
+        </div>
+        <Button onClick={() => handleSave(settings)} disabled={saving}>
+          {saving ? 'Saving...' : 'Save Changes'}
+        </Button>
+      </div>
+
+      <div className="flex gap-4 border-b">
+        {[
+          { id: 'general', label: 'General', icon: Settings },
+          { id: 'header', label: 'Header', icon: LayoutTemplate },
+          { id: 'footer', label: 'Footer', icon: Navigation },
+          { id: 'theme', label: 'Theme', icon: Palette }
+        ].map(tab => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id as any)}
+            className={cn(
+              "flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors",
+              activeTab === tab.id ? "border-black text-black" : "border-transparent text-gray-500 hover:text-black"
+            )}
+          >
+            <tab.icon className="h-4 w-4" />
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="max-w-4xl space-y-8">
+        {activeTab === 'general' && (
+          <div className="space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Site Name</label>
+                <Input 
+                  value={settings.general.siteName} 
+                  onChange={e => updateSettings({ general: { ...settings.general, siteName: e.target.value } })}
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Homepage Slug</label>
+                <Input 
+                  value={settings.general.homepageSlug} 
+                  onChange={e => updateSettings({ general: { ...settings.general, homepageSlug: e.target.value } })}
+                />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Site Logo</label>
+              <MediaPicker 
+                onSelect={(url) => updateSettings({ general: { ...settings.general, logo: url } })}
+                onClose={() => {}}
+                selectedUrls={settings.general.logo ? [settings.general.logo] : []}
+              />
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'header' && (
+          <div className="space-y-6">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Navigation Menu</label>
+              <select 
+                className="w-full rounded-xl border-gray-200 bg-gray-50 px-4 py-2 text-sm focus:border-black focus:ring-black"
+                value={settings.header.menuId}
+                onChange={e => updateSettings({ header: { ...settings.header, menuId: e.target.value } })}
+              >
+                <option value="">Select a menu</option>
+                {menus.map(menu => (
+                  <option key={menu.id} value={menu.handle}>{menu.title}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex items-center gap-4">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input 
+                  type="checkbox" 
+                  checked={settings.header.showSearch}
+                  onChange={e => updateSettings({ header: { ...settings.header, showSearch: e.target.checked } })}
+                  className="rounded border-gray-300 text-black focus:ring-black"
+                />
+                <span className="text-sm font-medium">Show Search Bar</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input 
+                  type="checkbox" 
+                  checked={settings.header.sticky}
+                  onChange={e => updateSettings({ header: { ...settings.header, sticky: e.target.checked } })}
+                  className="rounded border-gray-300 text-black focus:ring-black"
+                />
+                <span className="text-sm font-medium">Sticky Header</span>
+              </label>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'footer' && (
+          <div className="space-y-8">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Copyright Text</label>
+              <Input 
+                value={settings.footer.copyright} 
+                onChange={e => updateSettings({ footer: { ...settings.footer, copyright: e.target.value } })}
+              />
+            </div>
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="font-bold">Footer Columns</h3>
+                <Button variant="outline" size="sm" onClick={() => {
+                  const newCols = [...settings.footer.columns, { title: 'New Column', items: [] }];
+                  updateSettings({ footer: { ...settings.footer, columns: newCols } });
+                }}>
+                  Add Column
+                </Button>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {settings.footer.columns.map((col, i) => (
+                  <div key={i} className="p-4 border rounded-xl space-y-4">
+                    <div className="flex items-center justify-between">
+                      <Input 
+                        value={col.title} 
+                        onChange={e => {
+                          const newCols = [...settings.footer.columns];
+                          newCols[i].title = e.target.value;
+                          updateSettings({ footer: { ...settings.footer, columns: newCols } });
+                        }}
+                        className="font-bold border-none bg-transparent p-0 focus:ring-0"
+                      />
+                      <Button variant="ghost" size="icon" onClick={() => {
+                        const newCols = settings.footer.columns.filter((_, idx) => idx !== i);
+                        updateSettings({ footer: { ...settings.footer, columns: newCols } });
+                      }}>
+                        <Trash2 className="h-4 w-4 text-red-500" />
+                      </Button>
+                    </div>
+                    <div className="space-y-2">
+                      {col.items.map((item, j) => (
+                        <div key={j} className="flex gap-2">
+                          <Input 
+                            value={item.label} 
+                            placeholder="Label"
+                            onChange={e => {
+                              const newCols = [...settings.footer.columns];
+                              newCols[i].items[j].label = e.target.value;
+                              updateSettings({ footer: { ...settings.footer, columns: newCols } });
+                            }}
+                          />
+                          <Input 
+                            value={item.url} 
+                            placeholder="URL"
+                            onChange={e => {
+                              const newCols = [...settings.footer.columns];
+                              newCols[i].items[j].url = e.target.value;
+                              updateSettings({ footer: { ...settings.footer, columns: newCols } });
+                            }}
+                          />
+                          <Button variant="ghost" size="icon" onClick={() => {
+                            const newCols = [...settings.footer.columns];
+                            newCols[i].items = newCols[i].items.filter((_, idx) => idx !== j);
+                            updateSettings({ footer: { ...settings.footer, columns: newCols } });
+                          }}>
+                            <XCircle className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      ))}
+                      <Button variant="ghost" size="sm" className="w-full border-dashed border-2" onClick={() => {
+                        const newCols = [...settings.footer.columns];
+                        newCols[i].items.push({ label: 'New Link', url: '#' });
+                        updateSettings({ footer: { ...settings.footer, columns: newCols } });
+                      }}>
+                        Add Link
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'theme' && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Primary Color</label>
+              <div className="flex gap-4">
+                <input 
+                  type="color" 
+                  value={settings.theme.primaryColor}
+                  onChange={e => updateSettings({ theme: { ...settings.theme, primaryColor: e.target.value } })}
+                  className="h-10 w-20 rounded cursor-pointer"
+                />
+                <Input 
+                  value={settings.theme.primaryColor}
+                  onChange={e => updateSettings({ theme: { ...settings.theme, primaryColor: e.target.value } })}
+                />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Border Radius</label>
+              <select 
+                className="w-full rounded-xl border-gray-200 bg-gray-50 px-4 py-2 text-sm focus:border-black focus:ring-black"
+                value={settings.theme.borderRadius}
+                onChange={e => updateSettings({ theme: { ...settings.theme, borderRadius: e.target.value } })}
+              >
+                <option value="0">None (Sharp)</option>
+                <option value="0.5rem">Small</option>
+                <option value="1rem">Medium</option>
+                <option value="2rem">Large</option>
+                <option value="9999px">Full (Pill)</option>
+              </select>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
 import { Tooltip } from '../components/Tooltip';
@@ -1439,305 +1690,7 @@ const AdminCustomers = () => {
 
 // --- Appearance & CMS Settings ---
 const AdminAppearance = () => {
-  const [activeTab, setActiveTab] = React.useState<'header' | 'footer' | 'theme'>('header');
-  const [settings, setSettings] = React.useState<any>(null);
-  const [menus, setMenus] = React.useState<Menu[]>([]);
-  const [loading, setLoading] = React.useState(true);
-  const [saving, setSaving] = React.useState(false);
-  const [showMediaPicker, setShowMediaPicker] = React.useState<{ tab: string, field: string } | null>(null);
-
-  React.useEffect(() => {
-    const fetchData = async () => {
-      const docRef = doc(db, 'settings', 'appearance');
-      const docSnap = await getDoc(docRef);
-      if (docSnap.exists()) {
-        setSettings(docSnap.data());
-      } else {
-        setSettings({
-          header: {
-            logo: '',
-            menuId: '',
-            sticky: true,
-            transparent: false,
-            backgroundColor: '#ffffff',
-            textColor: '#000000'
-          },
-          footer: {
-            logo: '',
-            backgroundColor: '#f9fafb',
-            textColor: '#000000',
-            copyright: '© 2026 Your Store. All rights reserved.',
-            showNewsletter: true,
-            menuId: ''
-          },
-          theme: {
-            primaryColor: '#000000',
-            borderRadius: '1.5rem',
-            fontFamily: 'Inter'
-          }
-        });
-      }
-
-      const mSnap = await getDocs(collection(db, 'menus'));
-      setMenus(mSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Menu)));
-      setLoading(false);
-    };
-    fetchData();
-  }, []);
-
-  const handleSave = async () => {
-    setSaving(true);
-    try {
-      await setDoc(doc(db, 'settings', 'appearance'), settings);
-      // alert('Settings saved successfully!');
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  if (loading) return <div className="flex items-center justify-center h-64"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-black"></div></div>;
-
-  return (
-    <div className="space-y-8">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight text-black">Appearance</h1>
-          <p className="text-sm text-gray-500 mt-1">Customize your store's look and feel.</p>
-        </div>
-        <Button onClick={handleSave} isLoading={saving} className="rounded-full px-6">
-          Save Changes
-        </Button>
-      </div>
-
-      <div className="flex flex-col lg:flex-row gap-8">
-        <div className="w-full lg:w-64 space-y-2">
-          {[
-            { id: 'header', label: 'Header', icon: LayoutTemplate },
-            { id: 'footer', label: 'Footer', icon: LayoutTemplate },
-            { id: 'theme', label: 'Theme Settings', icon: Palette },
-          ].map(tab => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id as any)}
-              className={cn(
-                "w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-bold transition-all",
-                activeTab === tab.id ? "bg-black text-white shadow-lg" : "text-gray-500 hover:bg-gray-100"
-              )}
-            >
-              <tab.icon className="h-5 w-5" />
-              {tab.label}
-            </button>
-          ))}
-        </div>
-
-        <div className="flex-1 space-y-8">
-          {activeTab === 'header' && (
-            <div className="p-8 rounded-3xl border bg-white shadow-sm space-y-8">
-              <h3 className="text-xl font-bold">Header Configuration</h3>
-              <div className="grid grid-cols-1 gap-8">
-                <div className="space-y-4">
-                  <label className="text-xs font-bold text-gray-400 uppercase tracking-widest">Logo</label>
-                  <div 
-                    className="h-24 w-48 rounded-2xl border-2 border-dashed flex flex-col items-center justify-center bg-gray-50 overflow-hidden cursor-pointer hover:bg-gray-100 transition-all group"
-                    onClick={() => setShowMediaPicker({ tab: 'header', field: 'logo' })}
-                  >
-                    {settings.header.logo ? (
-                      <img src={settings.header.logo} alt="" className="h-full w-full object-contain p-4" />
-                    ) : (
-                      <>
-                        <ImageIcon className="h-8 w-8 text-gray-300 mb-1" />
-                        <p className="text-[10px] font-bold text-gray-400 uppercase">Select Logo</p>
-                      </>
-                    )}
-                  </div>
-                </div>
-
-                <div className="space-y-4">
-                  <label className="text-xs font-bold text-gray-400 uppercase tracking-widest">Navigation Menu</label>
-                  <select 
-                    className="w-full rounded-xl border border-gray-300 p-3 text-sm focus:ring-2 focus:ring-black"
-                    value={settings.header.menuId}
-                    onChange={e => setSettings({...settings, header: {...settings.header, menuId: e.target.value}})}
-                  >
-                    <option value="">Select a menu</option>
-                    {menus.map(menu => <option key={menu.id} value={menu.id}>{menu.title}</option>)}
-                  </select>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <Input 
-                    label="Background Color" 
-                    type="color" 
-                    value={settings.header.backgroundColor} 
-                    onChange={e => setSettings({...settings, header: {...settings.header, backgroundColor: e.target.value}})} 
-                  />
-                  <Input 
-                    label="Text Color" 
-                    type="color" 
-                    value={settings.header.textColor} 
-                    onChange={e => setSettings({...settings, header: {...settings.header, textColor: e.target.value}})} 
-                  />
-                </div>
-
-                <div className="flex items-center justify-between p-6 rounded-2xl bg-gray-50">
-                  <div>
-                    <p className="text-sm font-bold">Sticky Header</p>
-                    <p className="text-xs text-gray-400">Header stays at the top while scrolling</p>
-                  </div>
-                  <button 
-                    onClick={() => setSettings({...settings, header: {...settings.header, sticky: !settings.header.sticky}})}
-                    className={`h-6 w-11 rounded-full transition-colors relative ${settings.header.sticky ? 'bg-black' : 'bg-gray-200'}`}
-                  >
-                    <div className={`absolute top-1 left-1 h-4 w-4 bg-white rounded-full transition-transform ${settings.header.sticky ? 'translate-x-5' : ''}`} />
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {activeTab === 'footer' && (
-            <div className="p-8 rounded-3xl border bg-white shadow-sm space-y-8">
-              <h3 className="text-xl font-bold">Footer Configuration</h3>
-              <div className="grid grid-cols-1 gap-8">
-                <div className="space-y-4">
-                  <label className="text-xs font-bold text-gray-400 uppercase tracking-widest">Footer Logo</label>
-                  <div 
-                    className="h-24 w-48 rounded-2xl border-2 border-dashed flex flex-col items-center justify-center bg-gray-50 overflow-hidden cursor-pointer hover:bg-gray-100 transition-all group"
-                    onClick={() => setShowMediaPicker({ tab: 'footer', field: 'logo' })}
-                  >
-                    {settings.footer.logo ? (
-                      <img src={settings.footer.logo} alt="" className="h-full w-full object-contain p-4" />
-                    ) : (
-                      <>
-                        <ImageIcon className="h-8 w-8 text-gray-300 mb-1" />
-                        <p className="text-[10px] font-bold text-gray-400 uppercase">Select Logo</p>
-                      </>
-                    )}
-                  </div>
-                </div>
-
-                <div className="space-y-4">
-                  <label className="text-xs font-bold text-gray-400 uppercase tracking-widest">Footer Menu</label>
-                  <select 
-                    className="w-full rounded-xl border border-gray-300 p-3 text-sm focus:ring-2 focus:ring-black"
-                    value={settings.footer.menuId}
-                    onChange={e => setSettings({...settings, footer: {...settings.footer, menuId: e.target.value}})}
-                  >
-                    <option value="">Select a menu</option>
-                    {menus.map(menu => <option key={menu.id} value={menu.id}>{menu.title}</option>)}
-                  </select>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <Input 
-                    label="Background Color" 
-                    type="color" 
-                    value={settings.footer.backgroundColor} 
-                    onChange={e => setSettings({...settings, footer: {...settings.footer, backgroundColor: e.target.value}})} 
-                  />
-                  <Input 
-                    label="Text Color" 
-                    type="color" 
-                    value={settings.footer.textColor} 
-                    onChange={e => setSettings({...settings, footer: {...settings.footer, textColor: e.target.value}})} 
-                  />
-                </div>
-
-                <Input 
-                  label="Copyright Text" 
-                  value={settings.footer.copyright} 
-                  onChange={e => setSettings({...settings, footer: {...settings.footer, copyright: e.target.value}})} 
-                />
-
-                <div className="flex items-center justify-between p-6 rounded-2xl bg-gray-50">
-                  <div>
-                    <p className="text-sm font-bold">Newsletter Signup</p>
-                    <p className="text-xs text-gray-400">Show newsletter form in footer</p>
-                  </div>
-                  <button 
-                    onClick={() => setSettings({...settings, footer: {...settings.footer, showNewsletter: !settings.footer.showNewsletter}})}
-                    className={`h-6 w-11 rounded-full transition-colors relative ${settings.footer.showNewsletter ? 'bg-black' : 'bg-gray-200'}`}
-                  >
-                    <div className={`absolute top-1 left-1 h-4 w-4 bg-white rounded-full transition-transform ${settings.footer.showNewsletter ? 'translate-x-5' : ''}`} />
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {activeTab === 'theme' && (
-            <div className="p-8 rounded-3xl border bg-white shadow-sm space-y-8">
-              <h3 className="text-xl font-bold">Theme Settings</h3>
-              <div className="grid grid-cols-1 gap-8">
-                <Input 
-                  label="Primary Brand Color" 
-                  type="color" 
-                  value={settings.theme.primaryColor} 
-                  onChange={e => setSettings({...settings, theme: {...settings.theme, primaryColor: e.target.value}})} 
-                />
-                
-                <div className="space-y-4">
-                  <label className="text-xs font-bold text-gray-400 uppercase tracking-widest">Border Radius</label>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    {[
-                      { label: 'Sharp', value: '0px' },
-                      { label: 'Small', value: '0.5rem' },
-                      { label: 'Medium', value: '1rem' },
-                      { label: 'Large', value: '1.5rem' }
-                    ].map(radius => (
-                      <button
-                        key={radius.value}
-                        onClick={() => setSettings({...settings, theme: {...settings.theme, borderRadius: radius.value}})}
-                        className={cn(
-                          "p-4 rounded-2xl border text-sm font-bold transition-all",
-                          settings.theme.borderRadius === radius.value ? "border-black bg-black text-white" : "border-gray-100 hover:border-gray-200"
-                        )}
-                      >
-                        {radius.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="space-y-4">
-                  <label className="text-xs font-bold text-gray-400 uppercase tracking-widest">Font Family</label>
-                  <select 
-                    className="w-full rounded-xl border border-gray-300 p-3 text-sm focus:ring-2 focus:ring-black"
-                    value={settings.theme.fontFamily}
-                    onChange={e => setSettings({...settings, theme: {...settings.theme, fontFamily: e.target.value}})}
-                  >
-                    <option value="Inter">Inter (Modern Sans)</option>
-                    <option value="Outfit">Outfit (Geometric Sans)</option>
-                    <option value="Space Grotesk">Space Grotesk (Tech Mono)</option>
-                    <option value="Playfair Display">Playfair Display (Elegant Serif)</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-
-      <AnimatePresence>
-        {showMediaPicker && (
-          <MediaPicker 
-            onClose={() => setShowMediaPicker(null)}
-            onSelect={(url) => {
-              const { tab, field } = showMediaPicker;
-              setSettings({
-                ...settings,
-                [tab]: { ...settings[tab], [field]: url }
-              });
-              setShowMediaPicker(null);
-            }}
-            selectedUrls={settings[showMediaPicker.tab]?.[showMediaPicker.field] ? [settings[showMediaPicker.tab][showMediaPicker.field]] : []}
-          />
-        )}
-      </AnimatePresence>
-    </div>
-  );
+  return <AdminSettings initialTab="header" />;
 };
 
 // --- Navigation Management ---
@@ -1936,27 +1889,6 @@ const MenuForm = ({ menu, onCancel, onSuccess }: { menu: Menu | null, onCancel: 
 };
 
 // --- Settings Management ---
-const AdminSettings = () => {
-  return (
-    <div className="space-y-8 max-w-2xl">
-      <h1 className="text-3xl font-bold tracking-tight text-black">General Settings</h1>
-      <div className="p-8 rounded-3xl border bg-white shadow-sm space-y-6">
-        <Input label="Store Name" defaultValue="LuxeCommerce" />
-        <Input label="Store Email" defaultValue="contact@luxe.com" />
-        <div className="space-y-1.5">
-          <label className="text-sm font-medium text-gray-700">Store Currency</label>
-          <select className="w-full rounded-xl border border-gray-300 p-3 text-sm focus:ring-2 focus:ring-black">
-            <option>USD ($)</option>
-            <option>EUR (€)</option>
-            <option>GBP (£)</option>
-          </select>
-        </div>
-        <Button className="w-full rounded-full h-12">Save Settings</Button>
-      </div>
-    </div>
-  );
-};
-
 // --- Media Management ---
 const AdminMedia = () => {
   const [media, setMedia] = React.useState<any[]>([]);

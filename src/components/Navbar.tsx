@@ -3,18 +3,37 @@ import { Link, useNavigate } from 'react-router-dom';
 import { ShoppingBag, User, Menu, X, Search, LogOut, LayoutDashboard } from 'lucide-react';
 import { useAuthStore } from '../store/useAuthStore';
 import { useCartStore } from '../store/useCartStore';
+import { useSettingsStore } from '../store/useSettingsStore';
 import { Button } from './Button';
 import { motion, AnimatePresence } from 'motion/react';
-import { auth } from '../firebase';
+import { auth, db } from '../firebase';
 import { signOut } from 'firebase/auth';
+import { collection, query, where, getDocs, limit } from 'firebase/firestore';
+import { Menu as MenuType } from '../types';
+import { cn } from '../lib/utils';
 
 export const Navbar = () => {
   const [isOpen, setIsOpen] = React.useState(false);
   const { user, isAdmin, setUser } = useAuthStore();
   const { items } = useCartStore();
+  const { settings } = useSettingsStore();
+  const [menu, setMenu] = React.useState<MenuType | null>(null);
   const navigate = useNavigate();
 
   const cartCount = items.reduce((acc, item) => acc + item.quantity, 0);
+
+  React.useEffect(() => {
+    const fetchMenu = async () => {
+      if (settings?.header.menuId) {
+        const q = query(collection(db, 'menus'), where('handle', '==', settings.header.menuId), limit(1));
+        const snap = await getDocs(q);
+        if (!snap.empty) {
+          setMenu({ id: snap.docs[0].id, ...snap.docs[0].data() } as MenuType);
+        }
+      }
+    };
+    fetchMenu();
+  }, [settings?.header.menuId]);
 
   const handleLogout = async () => {
     await signOut(auth);
@@ -22,30 +41,47 @@ export const Navbar = () => {
     navigate('/');
   };
 
+  const navLinks = menu?.items || [
+    { label: 'Shop', url: '/shop' },
+    { label: 'Categories', url: '/categories' },
+    { label: 'About', url: '/about' }
+  ];
+
   return (
-    <nav className="sticky top-0 z-50 w-full border-b bg-white/80 backdrop-blur-md">
+    <nav className={cn(
+      "z-50 w-full border-b bg-white/80 backdrop-blur-md",
+      settings?.header.sticky ? "sticky top-0" : "relative"
+    )}>
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         <div className="flex h-16 items-center justify-between">
           <div className="flex items-center gap-8">
-            <Link to="/" className="text-2xl font-bold tracking-tighter text-black">
-              LUXE.
+            <Link to="/" className="text-2xl font-bold tracking-tighter text-black flex items-center gap-2">
+              {settings?.general.logo ? (
+                <img src={settings.general.logo} alt={settings.general.siteName} className="h-8 w-auto" />
+              ) : (
+                settings?.general.siteName || 'LUXE.'
+              )}
             </Link>
             <div className="hidden md:flex items-center gap-6">
-              <Link to="/shop" className="text-sm font-medium text-gray-600 hover:text-black">Shop</Link>
-              <Link to="/categories" className="text-sm font-medium text-gray-600 hover:text-black">Categories</Link>
-              <Link to="/about" className="text-sm font-medium text-gray-600 hover:text-black">About</Link>
+              {navLinks.map((link, i) => (
+                <Link key={i} to={link.url} className="text-sm font-medium text-gray-600 hover:text-black">
+                  {link.label}
+                </Link>
+              ))}
             </div>
           </div>
 
           <div className="flex items-center gap-4">
-            <div className="hidden sm:flex items-center bg-gray-100 rounded-full px-3 py-1.5">
-              <Search className="h-4 w-4 text-gray-400" />
-              <input 
-                type="text" 
-                placeholder="Search..." 
-                className="bg-transparent border-none focus:ring-0 text-sm ml-2 w-32 md:w-48"
-              />
-            </div>
+            {settings?.header.showSearch && (
+              <div className="hidden sm:flex items-center bg-gray-100 rounded-full px-3 py-1.5">
+                <Search className="h-4 w-4 text-gray-400" />
+                <input 
+                  type="text" 
+                  placeholder="Search..." 
+                  className="bg-transparent border-none focus:ring-0 text-sm ml-2 w-32 md:w-48"
+                />
+              </div>
+            )}
 
             <Link to="/cart" className="relative p-2 hover:bg-gray-100 rounded-full transition-colors">
               <ShoppingBag className="h-5 w-5" />

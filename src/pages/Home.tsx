@@ -5,14 +5,31 @@ import { Button } from '../components/Button';
 import { ProductCard } from '../components/ProductCard';
 import { collection, query, where, limit, getDocs } from 'firebase/firestore';
 import { db } from '../firebase';
-import { Product } from '../types';
+import { Product, Page } from '../types';
 import { motion } from 'motion/react';
+import { useSettingsStore } from '../store/useSettingsStore';
+import { cn } from '../lib/utils';
 
 export const Home = () => {
   const [featuredProducts, setFeaturedProducts] = React.useState<Product[]>([]);
   const [loading, setLoading] = React.useState(true);
+  const [homePage, setHomePage] = React.useState<Page | null>(null);
+  const { settings } = useSettingsStore();
 
   React.useEffect(() => {
+    const fetchHomeContent = async () => {
+      const slug = settings?.general.homepageSlug || 'home';
+      try {
+        const q = query(collection(db, 'pages'), where('slug', '==', slug), limit(1));
+        const snap = await getDocs(q);
+        if (!snap.empty) {
+          setHomePage({ id: snap.docs[0].id, ...snap.docs[0].data() } as Page);
+        }
+      } catch (err) {
+        console.error('Error fetching home page:', err);
+      }
+    };
+
     const fetchFeatured = async () => {
       try {
         const q = query(collection(db, 'products'), where('isFeatured', '==', true), limit(4));
@@ -25,8 +42,105 @@ export const Home = () => {
         setLoading(false);
       }
     };
+
+    fetchHomeContent();
     fetchFeatured();
-  }, []);
+  }, [settings?.general.homepageSlug]);
+
+  if (homePage) {
+    return (
+      <div className="pb-20">
+        {homePage.sections.map((section, i) => (
+          <section key={section.id || i} className="py-16 md:py-24">
+            <div className="mx-auto max-w-7xl px-4">
+              {section.type === 'hero' && (
+                <div className="relative h-[85vh] rounded-[3rem] overflow-hidden flex items-center justify-center text-center text-white">
+                  {section.content.image && (
+                    <img src={section.content.image} alt="" className="absolute inset-0 h-full w-full object-cover" />
+                  )}
+                  <div className="absolute inset-0 bg-black/40" />
+                  <div className="relative z-10 max-w-3xl px-6">
+                    <motion.h1 
+                      initial={{ opacity: 0, y: 20 }}
+                      whileInView={{ opacity: 1, y: 0 }}
+                      className="text-5xl md:text-7xl font-black tracking-tighter mb-6"
+                    >
+                      {section.content.title}
+                    </motion.h1>
+                    <motion.p 
+                      initial={{ opacity: 0, y: 20 }}
+                      whileInView={{ opacity: 1, y: 0 }}
+                      transition={{ delay: 0.1 }}
+                      className="text-xl text-gray-200 mb-10"
+                    >
+                      {section.content.text}
+                    </motion.p>
+                    <div className="flex justify-center gap-4">
+                      <Link to="/shop">
+                        <Button size="lg" className="rounded-full px-8">Shop Now</Button>
+                      </Link>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {section.type === 'image-with-text' && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-12 items-center">
+                  <motion.div 
+                    initial={{ opacity: 0, x: -20 }}
+                    whileInView={{ opacity: 1, x: 0 }}
+                    className="aspect-square rounded-[2rem] overflow-hidden bg-gray-100"
+                  >
+                    {section.content.image && (
+                      <img src={section.content.image} alt="" className="h-full w-full object-cover" />
+                    )}
+                  </motion.div>
+                  <motion.div 
+                    initial={{ opacity: 0, x: 20 }}
+                    whileInView={{ opacity: 1, x: 0 }}
+                    className="space-y-6"
+                  >
+                    <h2 className="text-4xl font-bold text-black tracking-tight">{section.content.title}</h2>
+                    <p className="text-lg text-gray-600 leading-relaxed">{section.content.text}</p>
+                    <Link to="/shop">
+                      <Button variant="outline" className="rounded-full">Learn More</Button>
+                    </Link>
+                  </motion.div>
+                </div>
+              )}
+
+              {section.type === 'featured-collection' && (
+                <div className="space-y-12">
+                  <div className="text-center space-y-4">
+                    <h2 className="text-4xl font-bold text-black tracking-tight">{section.content.title}</h2>
+                    <p className="text-lg text-gray-600">{section.content.text}</p>
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
+                    {featuredProducts.map(product => (
+                      <ProductCard key={product.id} product={product} />
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {section.type === 'newsletter' && (
+                <div className="max-w-4xl mx-auto rounded-[3rem] bg-black p-12 md:p-20 text-center text-white space-y-8">
+                  <div className="space-y-4">
+                    <h2 className="text-4xl md:text-5xl font-bold tracking-tight">{section.content.title}</h2>
+                    <p className="text-xl text-gray-400">{section.content.text}</p>
+                  </div>
+                  <div className="flex flex-col md:flex-row gap-4 max-w-md mx-auto">
+                    <input type="email" placeholder="Enter your email" className="flex-1 bg-white/10 border border-white/20 rounded-2xl px-6 py-4 text-white focus:outline-none focus:ring-2 focus:ring-white" />
+                    <Button className="bg-white text-black hover:bg-gray-100">Subscribe</Button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </section>
+        ))}
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-20 pb-20">

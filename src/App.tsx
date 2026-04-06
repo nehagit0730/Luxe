@@ -4,6 +4,7 @@ import { onAuthStateChanged } from 'firebase/auth';
 import { doc, getDoc, updateDoc, setDoc } from 'firebase/firestore';
 import { auth, db } from './firebase';
 import { useAuthStore } from './store/useAuthStore';
+import { useSettingsStore } from './store/useSettingsStore';
 import { Layout } from './components/Layout';
 import { Home } from './pages/Home';
 import { Shop } from './pages/Shop';
@@ -35,8 +36,10 @@ const ProtectedRoute = ({ children, adminOnly = false }: { children: React.React
 
 export default function App() {
   const { setUser, setLoading } = useAuthStore();
+  const { fetchSettings } = useSettingsStore();
 
   React.useEffect(() => {
+    fetchSettings();
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
         const userDocRef = doc(db, 'users', firebaseUser.uid);
